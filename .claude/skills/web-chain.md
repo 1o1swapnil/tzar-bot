@@ -1,0 +1,1 @@
+../../skills/web-chain/SKILL.md

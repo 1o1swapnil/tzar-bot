@@ -1,0 +1,1 @@
+../../skills/wireless/SKILL.md

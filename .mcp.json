@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "tzar-bot": {
+      "command": "python3",
+      "args": ["/home/kali/Documents/tzar-bot/tools/mcp-server.py"]
+    },
+    "playwright": {
+      "command": "python3",
+      "args": ["/home/kali/Documents/tzar-bot/tools/playwright-mcp-server.py"]
+    }
+  }
+}

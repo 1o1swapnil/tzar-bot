@@ -1,0 +1,30 @@
+# Engagement data — may contain sensitive recon/credential material
+memory.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.venv-*/
+tools/.venv/
+tools/.venv-*/
+.pytest_cache/
+
+# Environment / credentials — NEVER commit
+.env
+.env.*
+
+# Engagement output folders — commit only when explicitly archiving
+WAPT/*/
+MAPT/*/
+API/*/
+Network/*/
+CodeReview/*/
+Cloud/*/
+RedTeam/*/
+DFIR/*/
+BugBounty/*/
+
+# Local Claude Code settings (may contain command history / tokens)
+.claude/settings.local.json

@@ -1,0 +1,47 @@
+# Engagement Scope — fill before triage. Drives Cover + Coverage Gaps tabs.
+
+engagement_name: ""           # e.g., "TrulyFinance Q2-2026 SAST/SCA"
+client: ""
+consultant: ""
+engagement_type: ""           # pre-prod gate | periodic audit | incident | M&A | compliance
+
+scan_start: ""                # ISO date
+scan_end: ""                  # ISO date
+
+application_class: ""         # monolith | microservices | mobile-ios | mobile-android | embedded | ml-llm | smart-contract
+deployment_model: ""          # on-prem | aws | azure | gcp | hybrid | air-gapped
+
+languages:                    # languages in scope; powers Coverage Gaps
+  - Java
+  - TypeScript
+  # - Python
+
+frameworks:
+  - Spring Boot
+  # - Next.js
+
+package_managers:
+  - maven
+  # - npm
+
+data_sensitivity: ""          # public | internal | confidential | regulated
+compliance:                   # frameworks the report must satisfy
+  - PCI-DSS
+  # - HIPAA
+  # - SOC2
+  # - DPDP
+
+asset_criticality_default: "T1"   # T0 (crown jewel) | T1 | T2 | T3
+
+suppression_policy:
+  evidence_required: "vendor advisory OR runtime test OR explicit framework guard"
+  approver_role: "Security Lead"
+  expiry_max_days: 180
+
+deliverables:
+  - dashboard.xlsx
+  - report/executive.md
+  - report/consultant.md
+  - roadmap.csv
+
+notes: ""

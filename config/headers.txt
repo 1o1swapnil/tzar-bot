@@ -1,0 +1,70 @@
+# Security Headers Reference
+# Used during security header audit phase
+# Format: HeaderName | ExpectedValue | Severity if Missing
+
+# ─── CRITICAL HEADERS ─────────────────────────────────────────────
+
+# Prevents MIME sniffing
+X-Content-Type-Options: nosniff
+
+# Controls iframe embedding (clickjacking protection)
+X-Frame-Options: DENY
+X-Frame-Options: SAMEORIGIN
+
+# Enables XSS filter in older browsers
+X-XSS-Protection: 1; mode=block
+
+# Forces HTTPS connections
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+
+# Controls referrer information
+Referrer-Policy: no-referrer
+Referrer-Policy: strict-origin-when-cross-origin
+
+# Restricts browser features/APIs
+Permissions-Policy: geolocation=(), microphone=(), camera=()
+
+# Content Security Policy (most powerful, most complex)
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+
+# Cross-Origin Resource Sharing
+Access-Control-Allow-Origin: https://trusted.example.com
+# BAD: Access-Control-Allow-Origin: *  (with credentials)
+
+# Cross-Origin policies
+Cross-Origin-Embedder-Policy: require-corp
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Resource-Policy: same-origin
+
+# Cache control for sensitive pages
+Cache-Control: no-store, no-cache, must-revalidate
+Pragma: no-cache
+
+# ─── SERVER INFORMATION DISCLOSURE (should be removed/minimized) ──
+# These headers reveal technology info — check if present
+Server: Apache/2.4.41 (should not reveal version)
+X-Powered-By: PHP/7.4.3 (should be removed)
+X-AspNet-Version: 4.0.30319 (should be removed)
+X-AspNetMvc-Version: 5.2 (should be removed)
+
+# ─── SESSION COOKIE FLAGS ─────────────────────────────────────────
+# Session cookies should have these attributes:
+Set-Cookie: session=value; Secure; HttpOnly; SameSite=Strict; Path=/
+# SameSite=Strict - Prevents CSRF in most cases
+# HttpOnly - Prevents JS access (mitigates XSS cookie theft)
+# Secure - Only transmitted over HTTPS
+
+# ─── AUDIT CHECKLIST ──────────────────────────────────────────────
+# Check each response for:
+# [MISSING] Strict-Transport-Security
+# [MISSING] Content-Security-Policy
+# [MISSING] X-Content-Type-Options
+# [MISSING] X-Frame-Options
+# [MISSING] Referrer-Policy
+# [MISSING] Permissions-Policy
+# [PRESENT] X-Powered-By (information disclosure)
+# [PRESENT] Server with version (information disclosure)
+# [MISSING] SameSite cookie flag
+# [MISSING] HttpOnly cookie flag
+# [MISSING] Secure cookie flag
+# [PRESENT] Access-Control-Allow-Origin: * (permissive CORS)

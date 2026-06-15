@@ -1,0 +1,1 @@
+../../skills/server-side/SKILL.md

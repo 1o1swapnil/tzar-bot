@@ -1,0 +1,1 @@
+../../skills/coordination/SKILL.md

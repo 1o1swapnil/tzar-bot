@@ -1,0 +1,50 @@
+{
+  "enabledMcpjsonServers": ["tzar-bot", "playwright"],
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /home/kali/Documents/tzar-bot/tools/scope-check.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "skillOverrides": {
+    "web-chain":              "on",
+    "coordination":           "on",
+    "reconnaissance":         "on",
+    "osint":                  "on",
+    "techstack-identification": "on",
+    "injection":              "on",
+    "server-side":            "on",
+    "client-side":            "on",
+    "api-security":           "on",
+    "authentication":         "on",
+    "web-app-logic":          "on",
+    "infrastructure":         "on",
+    "cloud-containers":       "on",
+    "source-code-scanning":   "on",
+    "dfir":                   "on",
+    "hackthebox":             "on",
+    "hackerone":              "on",
+    "cve-poc-generator":      "on",
+    "cve-risk-score":         "on",
+    "script-generator":       "on",
+    "patt-fetcher":           "on",
+    "social-engineering":     "on",
+    "blockchain-security":    "on",
+    "ai-threat-testing":      "on",
+    "github-workflow":        "on",
+    "skill-update":           "on",
+    "wireless":               "on",
+    "mapt":                   "on",
+    "red-team":               "on",
+    "essential-tools":        "name-only",
+    "system":                 "name-only"
+  }
+}

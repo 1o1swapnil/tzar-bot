@@ -1,0 +1,351 @@
+{
+  "upstream": "/home/kali/Documents/AI-tools/Claude-BugHunter",
+  "upstream_commit": "987b22dda819e5e7df77642d3c14ed73fcfe6ff8",
+  "skills": {
+    "m365-entra-attack": {
+      "kind": "standalone",
+      "upstream_rel": "skills/m365-entra-attack",
+      "hash": "bc8f4331c9e5826abed4a62813e38d3cd45a03ce89c073005cd537f11931ce4b"
+    },
+    "okta-attack": {
+      "kind": "standalone",
+      "upstream_rel": "skills/okta-attack",
+      "hash": "0ddc2bc020135e99cf6e311a00e1ff9bac57aaf7c1ddb358b8f7a656af3eb899"
+    },
+    "vmware-vcenter-attack": {
+      "kind": "standalone",
+      "upstream_rel": "skills/vmware-vcenter-attack",
+      "hash": "886103a9fc766cd4c8e60f26c395848f1df634c86091aace402cbd235d9757ec"
+    },
+    "enterprise-vpn-attack": {
+      "kind": "standalone",
+      "upstream_rel": "skills/enterprise-vpn-attack",
+      "hash": "98cb7dfe7f2bb081729d594165cd7c653abc97e888426c932c48b8b7fd5426bd"
+    },
+    "hunt-sharepoint": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-sharepoint",
+      "hash": "406c5f07c33b013d37ac65699a94f8ab3f7a73b1aa5f86d6367f3bd00a7276a6"
+    },
+    "hunt-ntlm-info": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-ntlm-info",
+      "hash": "9daad23649a452770a351aa3bee128c4a313b29fe1c58ea6a2176443c2bfc68c"
+    },
+    "supply-chain-attack-recon": {
+      "kind": "standalone",
+      "upstream_rel": "skills/supply-chain-attack-recon",
+      "hash": "89c9ed94dfb9986b58187db504739bae3f120e1634ff375028f77e717342f3a1"
+    },
+    "cloud-iam-deep": {
+      "kind": "standalone",
+      "upstream_rel": "skills/cloud-iam-deep",
+      "hash": "e1c60e129751eb6ded7a6045b3e17d8b4b6a60dd553c1291127c18bfd0ba4546"
+    },
+    "hunt-cache-poison": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-cache-poison",
+      "hash": "dd5b94a5b29df619d4a7d4bfb10bd7483b8387401fff16a8a7aecd8f475cf256"
+    },
+    "hunt-deserialization": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-deserialization",
+      "hash": "3c33ee41700b0fa42f62e28e254d2c1ace878cca0c0c4b2c6bd8c13cd6c94267"
+    },
+    "hunt-http-smuggling": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-http-smuggling",
+      "hash": "beca42b29019649292f828ed2a8215232a745ad1d3e57cc511877415507ae3e9"
+    },
+    "hunt-host-header": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-host-header",
+      "hash": "08120052b9166e74f2ae30ad8fcb04d55e635739bb5ca9fab41d223a9f6470d1"
+    },
+    "hunt-open-redirect": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-open-redirect",
+      "hash": "bb138ccfda3dd8c5c7709d71ea04e52b67b165187f7aa06d7f3f8d250af905fa"
+    },
+    "hunt-websocket": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-websocket",
+      "hash": "f9ffeaa5b4c72897c3b4df0de0e6a40db4a71abc23959f75d467c3944a36633a"
+    },
+    "hunt-grpc": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-grpc",
+      "hash": "8b86ad0fb4152a9184d16755e94d02e115378d2f27108833932cf7b4a5f0d682"
+    },
+    "hunt-saml": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-saml",
+      "hash": "b307721fc43bc27f2b889b03c2a7291ddf19e137a5c2f0ab9308502b46ef1db7"
+    },
+    "hunt-nosqli": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-nosqli",
+      "hash": "3f344d11fd05c1951a606280b079417079c06b50db1573ff660013cc9684887e"
+    },
+    "hunt-ldap": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-ldap",
+      "hash": "2e741e452f2d20aece47daca851c01006c82481d836cf38f75ee3ed556c0ed8c"
+    },
+    "hunt-cicd": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-cicd",
+      "hash": "4bd93b00fbf38e46371d47e14aa322dfe94a453385d69f23c9e670b5bbf5293e"
+    },
+    "hunt-tls-network": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-tls-network",
+      "hash": "33a5bd32126b1cdbbbfd1c2cd1ce93580a6f105204d5bfc4498dd7be1a3634de"
+    },
+    "hunt-aspnet": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-aspnet",
+      "hash": "6e0724f5208d137c12b81ee9f5213d7e4e564eede2c9e6f02d14a4095b69726d"
+    },
+    "hunt-laravel": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-laravel",
+      "hash": "3ae0cb5b0210790dfa60295a56f52aa0c1aacb1dda952e9ecde2d594da0a36f8"
+    },
+    "hunt-nextjs": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-nextjs",
+      "hash": "a3a76c11c5f8d54e6188a8407be36b9e381e2b0fea12681fbc4f645d974a1716"
+    },
+    "hunt-nodejs": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-nodejs",
+      "hash": "6107df50dd0d4d2e8ff51fd1c1cfd335d1914bb7137db1b93bb49f56698d4c95"
+    },
+    "hunt-springboot": {
+      "kind": "standalone",
+      "upstream_rel": "skills/hunt-springboot",
+      "hash": "e5f46bf298fa1e4f2cb16224ee6a57b1f8a55d0cae49330cdf7f078c2a286340"
+    },
+    "bugcrowd-reporting": {
+      "kind": "standalone",
+      "upstream_rel": "skills/bugcrowd-reporting",
+      "hash": "0478fdc7608f301a18c7550900e3ae7dc581bfc644e0ce9617adecb8dc30bf9c"
+    },
+    "evidence-hygiene": {
+      "kind": "standalone",
+      "upstream_rel": "skills/evidence-hygiene",
+      "hash": "9f917bd799177fbd57b658fd1f366be683924e859de3c95b6dddf9163fd271cf"
+    },
+    "redteam-report-template": {
+      "kind": "standalone",
+      "upstream_rel": "skills/redteam-report-template",
+      "hash": "e6f64a84b1cefa348a889c26e51bd563e87d165fdd517403a80738f527c8a8e9"
+    },
+    "mid-engagement-ir-detection": {
+      "kind": "standalone",
+      "upstream_rel": "skills/mid-engagement-ir-detection",
+      "hash": "8ff8856052452f9cd8ba6e4af0b5abd72b79ceb4470ab357095bcd78cb7d187f"
+    },
+    "bb-methodology": {
+      "kind": "standalone",
+      "upstream_rel": "skills/bb-methodology",
+      "hash": "f463898a013c95d457a1d2392d459e95596d2acf9195a4b3cb18d064c94ffb7d"
+    },
+    "bb-local-toolkit": {
+      "kind": "standalone",
+      "upstream_rel": "skills/bb-local-toolkit",
+      "hash": "12416a2373dc0700d22f0cfcfb13cf33a0fd16ca599c75d0eeba639e22460035"
+    },
+    "meme-coin-audit": {
+      "kind": "standalone",
+      "upstream_rel": "skills/meme-coin-audit",
+      "hash": "565194487a06a1da9de73dde244c84023aecab18d7e53abde38ad5d2b09c9d69"
+    },
+    "hunt-sqli": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-sqli",
+      "hash": "f2f0d13234d659a3146eef9b693024ba0be07639cd4ac1e8454dc5b18c08d7e3"
+    },
+    "hunt-ssrf": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-ssrf",
+      "hash": "5a4b6e85a8a96fd9b54e5493c7ea775c966a12454b29785cf391896a4c2af931"
+    },
+    "hunt-ssti": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-ssti",
+      "hash": "1b4156b7f6855b3788d682ceee8a69792e18a88a7804fcf9e2f79bf605d95cc6"
+    },
+    "hunt-xss": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-xss",
+      "hash": "97b0eb0fbc72fbbee56dafbd308c206545e28577b5d302f9d228fdf3c6255e63"
+    },
+    "hunt-xxe": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-xxe",
+      "hash": "9b44853f8f8114939dcc60c82452e45fa0e6c37d8832bc256417aabf12a253cc"
+    },
+    "hunt-lfi": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-lfi",
+      "hash": "00773d57e885a7b19165de659a423e8cfa5909c10a55153d8575fbd4499fc18b"
+    },
+    "hunt-rce": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-rce",
+      "hash": "c97950a538c00f201fe6d418adae1d61defc380b0713bb74350f779c532f2992"
+    },
+    "hunt-ato": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-ato",
+      "hash": "1ed34224bb9ba9a1219e8f0da897ac80094d5756f2579bd626dedab510fdc6e3"
+    },
+    "hunt-auth-bypass": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-auth-bypass",
+      "hash": "4a0ac9473e7c574632002c01fb7c47e15a9fa59eea5b9df03dc7dcc361f2078b"
+    },
+    "hunt-brute-force": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-brute-force",
+      "hash": "029b37b4c479f51ef2112d05b3c2c138caf8de894e6f7582a79bdd5a4498403c"
+    },
+    "hunt-mfa-bypass": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-mfa-bypass",
+      "hash": "60b92a94f2c82fa406c14d2bca1fe5a29309c91fa2e00062132343332b787fc8"
+    },
+    "hunt-oauth": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-oauth",
+      "hash": "9b94d5123a11d6a3a0f430e96822b83fd5de826bb8b49f45e0b79208367f4f39"
+    },
+    "hunt-session": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-session",
+      "hash": "08ee3a4c9d29654237fdddb9eb5787619c9872e74d7e6f0eace2c89611473b9a"
+    },
+    "hunt-idor": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-idor",
+      "hash": "b1a264b3b1854d5cf55304258aa108b384d081e7326313d3407ea094b1593601"
+    },
+    "hunt-api-misconfig": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-api-misconfig",
+      "hash": "86671124ac4141cfccda977f86f4691c5d5d6f785f5d59d8c1c6167e5fc1d22a"
+    },
+    "hunt-graphql": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-graphql",
+      "hash": "0c51ba119925761bdd4e24b11e7dac2952fe4cc474a0e69ea6ad96e310e3d074"
+    },
+    "hunt-csrf": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-csrf",
+      "hash": "d8652cf47934fdc7c5b8e6262d07b39664a6145d2590213f4f39c9ac5a1defb1"
+    },
+    "hunt-dom": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-dom",
+      "hash": "781b0d0c624c275b4d5ce72edd47598d345b5502e925d0368039cbf7f5a905df"
+    },
+    "hunt-cors": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-cors",
+      "hash": "8713e484ec917a5fe1c0ed49d4c9fc39f805e9402cf81f01dbcf774a212872a6"
+    },
+    "hunt-file-upload": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-file-upload",
+      "hash": "fc97d96d6f6494d718757f92d4a0d258f9a223094140539a03ef5bd27c157703"
+    },
+    "hunt-misc": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-misc",
+      "hash": "b140093a54554fedb76b1cada29b08e8c6f53d25bd5c8481a2b2d2e9e669012d"
+    },
+    "hunt-business-logic": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-business-logic",
+      "hash": "2d00fa11a40546fd378470b108196a8ae882ad6e9ede11c6dce871fff47de5de"
+    },
+    "hunt-race-condition": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-race-condition",
+      "hash": "a1db2fd38e4a20960584a13fe9f7f6db5f06cf922a99e990190be1d9a70a89bf"
+    },
+    "hunt-cloud-misconfig": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-cloud-misconfig",
+      "hash": "fa44aad92da4604f12aaa65c422a0f726477f921cb94e39987a54b3a2ceb48c1"
+    },
+    "hunt-k8s": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-k8s",
+      "hash": "192c51dab20e4ad019cbfa11e373ce4543d2e6750fb90d84b63f8eaa3c03c981"
+    },
+    "hunt-subdomain": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-subdomain",
+      "hash": "6bc098fc2e5f78c0a8e290afdb03ab40826dc15a0d87e835698c83caff5a8bec"
+    },
+    "web2-recon": {
+      "kind": "merged",
+      "upstream_rel": "skills/web2-recon",
+      "hash": "8b99b9071b8cddbafaa990270712f519d4b209545612f4c3eed29f2bbbc1d3bb"
+    },
+    "hunt-source-leak": {
+      "kind": "merged",
+      "upstream_rel": "skills/hunt-source-leak",
+      "hash": "332e01aae46eeb9cbe626a13be62bc05ab043500d20df120fda7011b18b196d1"
+    },
+    "offensive-osint": {
+      "kind": "merged",
+      "upstream_rel": "skills/offensive-osint",
+      "hash": "32588c4042e8d3ab5e37fb74d2bfc300899cf5834c8c05566987191529a936ac"
+    },
+    "osint-methodology": {
+      "kind": "merged",
+      "upstream_rel": "skills/osint-methodology",
+      "hash": "ef8c6adea32018d6e705cee3a2467169e7a7eb11740ed9f241f190e2ee23dcfb"
+    },
+    "apk-redteam-pipeline": {
+      "kind": "merged",
+      "upstream_rel": "skills/apk-redteam-pipeline",
+      "hash": "fc4b8fecf07102877282634b2f49dd72e4c1ac6b19815b8e72ae703e25361689"
+    },
+    "redteam-mindset": {
+      "kind": "merged",
+      "upstream_rel": "skills/redteam-mindset",
+      "hash": "9c77ba422bf6a45c3e0ae04c49ddd3ad72f1c36f205e3880285bd40103b545f9"
+    },
+    "security-arsenal": {
+      "kind": "merged",
+      "upstream_rel": "skills/security-arsenal",
+      "hash": "d93f49e8bdc79f1765960658b89ed3cb5f2e8017d752e823f18beadb24ed03bf"
+    },
+    "web3-audit": {
+      "kind": "merged",
+      "upstream_rel": "skills/web3-audit",
+      "hash": "345eb36ce96c4ca9c1bf0627f9a7d5522722e71f94fe0262837bde4bb222a03a"
+    },
+    "bug-bounty": {
+      "kind": "merged",
+      "upstream_rel": "skills/bug-bounty",
+      "hash": "356efc79f15e7071efbbad04b17448470c99a47dd107fa565c343ac7df2fffa1"
+    },
+    "triage-validation": {
+      "kind": "merged",
+      "upstream_rel": "skills/triage-validation",
+      "hash": "059bcb4febde6c3814b116cf718213473c3dffa51450adda5d90e6fffb6506aa"
+    },
+    "report-writing": {
+      "kind": "merged",
+      "upstream_rel": "skills/report-writing",
+      "hash": "0007462602c29ef1725d704736bdc25df35b35e54bfa133c44d5bd18b90c5599"
+    }
+  }
+}

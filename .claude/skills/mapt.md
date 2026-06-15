@@ -1,0 +1,1 @@
+../../skills/mapt/SKILL.md

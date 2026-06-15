@@ -1,0 +1,21 @@
+# config/safe-prefixes.txt — operator-maintained allow-list for scope-check.py
+#
+# Commands whose stripped form starts with any prefix below skip the scope check
+# entirely (they are local/tooling commands, not target network traffic).
+#
+# These are MERGED ON TOP of the built-in defaults in tools/scope-check.py — this
+# file only adds; it never removes a built-in. Edit here instead of the hook so the
+# allow-list can change without touching code. Missing file = built-ins only.
+#
+# Rules:
+#   - one prefix per line; matched with str.startswith() against the stripped command
+#   - lines starting with '#' and blank lines are ignored
+#   - a trailing space is significant ("nmap " won't match "nmaplike")
+#
+# Add your own below (examples commented out):
+# trufflehog
+# gitleaks
+# semgrep
+# nuclei -update-templates
+# terraform plan
+# az account show

@@ -97,6 +97,10 @@ skills/
 ├── hackthebox/          ← VPN, flag capture, HTB API submission
 ├── hackerone/           ← scope check, H1 API report submission
 ├── ai-threat-testing/   ← prompt injection, jailbreaks, RAG poisoning
+├── bias-fairness-testing/ ← demographic parity, disparate impact (fair-lending)
+├── model-robustness/    ← adversarial perturbation, edge-case, evasion testing
+├── model-monitoring/    ← covariate/concept drift, latency SLA, fallback checks
+├── incident-response/   ← IOC extraction, CERT-In disclosure packet + 6h countdown
 ├── social-engineering/  ← GoPhish, pretexting, vishing (authorized only)
 ├── dfir/                ← Volatility3, disk imaging, YARA, log analysis
 ├── blockchain-security/ ← Slither, Mythril, Echidna, Foundry

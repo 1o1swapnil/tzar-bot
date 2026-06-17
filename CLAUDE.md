@@ -49,7 +49,7 @@ eval $(python3 tools/init-engagement.py --type WAPT --project acme-corp \
 |---|---|
 | "web app", "website", "portal", "SaaS", "HTTP", "WAPT" | WAPT |
 | "mobile", "Android", "APK", "iOS", "IPA" | MAPT |
-| "API", "REST", "GraphQL", "gRPC", "endpoint", "Swagger" | API |
+| "API", "REST", "GraphQL", "gRPC", "endpoint", "Swagger" · "AI model", "ML model", "credit scoring", "loan model", "fairness", "bias", "model drift", "model robustness" (model-inference endpoint) | API |
 | "network", "AD", "firewall", "VPN", "infra", "internal" · "wireless", "WiFi", "WPA*", "802.11", "evil twin", "EAP", "Bluetooth", "BLE" | Network |
 | "source code", "code review", "SAST", "DAST", "repo", "GitHub" | CodeReview |
 | "AWS", "Azure", "GCP", "cloud", "S3", "container", "K8s", "Docker" | Cloud |
@@ -74,6 +74,7 @@ Skills live in `skills/` — each a `SKILL.md` plus a `reference/` folder. **Two
 | **Framework-specific** | `hunt-aspnet`, `hunt-laravel`, `hunt-nextjs`, `hunt-nodejs`, `hunt-springboot` |
 | **Infrastructure** | `infrastructure`, `system`, `cloud-containers`, `cloud-iam-deep`, `hunt-cicd`, `hunt-tls-network`, `hunt-ntlm-info` |
 | **Enterprise identity & perimeter** | `m365-entra-attack`, `okta-attack`, `vmware-vcenter-attack`, `enterprise-vpn-attack`, `hunt-sharepoint`, `supply-chain-attack-recon` |
+| **AI/ML model governance** | `bias-fairness-testing`, `model-robustness`, `model-monitoring`, `incident-response` |
 | **Wireless / Mobile** | `wireless`, `mapt` |
 | **Red Team** | `red-team`, `redteam-report-template`, `mid-engagement-ir-detection` |
 | **Specialized** | `blockchain-security`, `ai-threat-testing`, `social-engineering`, `dfir`, `meme-coin-audit` |

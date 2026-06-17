@@ -5,6 +5,15 @@
 **Analysis date:** 12 June 2026
 **Prepared for:** internal platform governance.
 
+> **Update — 17 June 2026 (AI/ML model-governance skill pack).** Four new skills landed,
+> closing/advancing gaps from §9: **`incident-response`** (IOC extraction + CERT-In
+> disclosure packet template + 6-hour reporting countdown wired to `notify.py`) closes the
+> *workflow* half of **gap #4**; **`bias-fairness-testing`**, **`model-robustness`**, and
+> **`model-monitoring`** add the AI-model-governance testing surface that advances **gap #6**
+> (AI-misuse risk) and the §2.0(b) *behavioural anomaly detection* / *continuous security
+> monitoring* rows. Still outstanding from gap #4: a standalone `tools/ioc-extract.py`
+> (currently inline `grep`) and the AI-misuse **scoring rubric** of gap #6.
+
 ---
 
 ## 0. How to read this document
@@ -201,9 +210,10 @@ These controls are the platform's licence to operate against this guideline. The
 > Largely **organisational**, but the most actionable **product gap** in the document lives here.
 
 ### 6.x Formal IR + disclosure process; on-exploitation actions (initiate IR, notify, preserve logs/forensics, identify IOCs, assess impact, contain, coordinate)
-**Status: 🟡 Partial → ❌ on workflow.**
+**Status: ✅ Workflow now present (was 🟡→❌).**
 - ✅ Forensic inputs: `dfir` (memory acquisition LiME/avml, disk imaging, Volatility 3, **IOC extraction**, log analysis), `mid-engagement-ir-detection`.
-- ❌ Gap: No **incident-response workflow** that strings these into a disclosure packet (IOCs + detection guidance + containment + impact), and no notify path tagged "incident". → **Build `incident-response` workflow + `ioc-extract.py`** (§6 roadmap, #4).
+- ✅ **Closed (17 Jun 2026):** the **`incident-response`** skill strings these into a disclosure packet (IOCs + detection guidance + containment + impact) and tags the notify path "incident" via `notify.py --level critical`.
+- 🟡 Residual: IOC extraction is inline `grep` rather than a standalone `tools/ioc-extract.py`; promote to a tool if a reusable/MCP-exposed primitive is wanted.
 
 ### 6.x 6-hour CERT-In reporting (Section 70B, Directions 20(3)/2022 dated 28 Apr 2022)
 **Status: ⚪ N/A (organisational/legal) — but tooling can help.** The legal duty to report within 6 hours is the OEM's. Tzar-Bot can ship a **CERT-In incident-report template + a countdown/notify helper** so the human meets the deadline. Currently absent.
@@ -242,9 +252,9 @@ Priority = (obligation explicitness in the guideline) × (effort to close) × (r
 | 1 | **SBOM generation** (incl. crypto/AI/quantum fields) | 2.0(d), 4.x, D4 | ❌/🟡 | `tools/sbom-gen.py` → CycloneDX/SPDX + extended fields | M | `techstack-identification`, `engagement-state` surface data |
 | 2 | **Native SCA / dependency-CVE scan** | 2.0(b), 4.x SDL, D2 | 🟡 | `tools/sca-scan.py` wrapping Trivy/Grype/osv-scanner, correlate to `nvd-lookup` | M | `nvd-lookup.py`, `source-code-scanning` ingest schema |
 | 3 | **Threat-modelling capability** | 2.0(b), 4.x SDL | ❌ | `skills/threat-modeling/` (STRIDE/attack-tree, data-flow, trust boundaries) | M | `techstack-identification`, attack-chain.md format |
-| 4 | **Incident-response & disclosure workflow** (IOCs, detection guidance, containment, zero-day packet, 6-hr CERT-In helper) | 2.1(c), §6, 6.1 | ❌/🟡 | `skills/incident-response/` + `tools/ioc-extract.py` + CERT-In report template & countdown notify | L | `dfir`, `mid-engagement-ir-detection`, `notify.py` |
+| 4 | **Incident-response & disclosure workflow** (IOCs, detection guidance, containment, zero-day packet, 6-hr CERT-In helper) | 2.1(c), §6, 6.1 | ✅ **closed 17 Jun** (residual: standalone `ioc-extract.py`) | `skills/incident-response/` ✅ + CERT-In report template & countdown notify ✅; `tools/ioc-extract.py` (inline grep for now) | L | `dfir`, `mid-engagement-ir-detection`, `notify.py` |
 | 5 | **Patch-advisory / remediation-plan generator** | 3.3, D2, b-disclosure | 🟡 | `tools/patch-advisory.py` → remediation action plan + patch-notification feed | S–M | `notify.py`, `cve-risk-score`, `state.json`, `generate-report.py` |
-| 6 | **AI-misuse risk rubric** (Data sensitivity / Autonomy / Connectivity / Impact) | 2.0(c) | 🟡 | scoring template + `ai-threat-testing` extension | S | `ai-threat-testing`, `scrub-web-content` |
+| 6 | **AI-misuse risk rubric** (Data sensitivity / Autonomy / Connectivity / Impact) | 2.0(c) | 🟡 (advanced 17 Jun: model-governance testing skills added; **scoring rubric still open**) | scoring template + `ai-threat-testing` extension; testing surface now via `bias-fairness-testing` / `model-robustness` / `model-monitoring` | S | `ai-threat-testing`, `scrub-web-content`, new model-governance skills |
 | 7 | **Certification / evidence-bundle generator** | 2.1(d), D5 | 🟡 | `tools/assurance-cert.py` — attest activities + run metadata | S | `token-meter`, `logs/`, validated artifacts |
 | 8 | **Composite posture-assessment report (D1)** + timeline-band stamping (3.1) | D1, 3.1 | 🟡 | extend `generate-report.py` templates | S | existing report engine |
 | 9 | **Scheduled credential-hygiene audit artifact** | §5 | 🟡 | `/schedule`d wrapper emitting evidence file | S | token scanners, `osint`, `/schedule` |

@@ -95,7 +95,7 @@ Skills live in `skills/` — each a `SKILL.md` plus a `reference/` folder. **Two
 
 ## Scope & State (code-enforced)
 
-Scope is enforced in **code**, not by trusting the model: `tools/scope.py` (deny-wins, default-deny, wildcard/CIDR/regex) is wired into the `scope-check.py` PreToolUse hook, so **out-of-scope `Bash` commands are blocked before they run**. Structured progress lives in the resumable, scope-guarded ledger `tools/engagement-state.py` (`state.json`), which also drops out-of-scope discoveries. Commands: `docs/operations.md`.
+Scope is enforced in **code**, not by trusting the model: `tools/scope.py` (deny-wins, default-deny, wildcard/CIDR/regex) is wired into the `scope-check.py` PreToolUse hook. The hook parses each `Bash` command **shell-aware** — splitting on operators/pipes, stripping wrappers (`sudo`, `env`, `timeout`, `xargs`, `bash -c`), resolving `$VAR`, and checking every stage — so **out-of-scope targets are blocked before the command runs**, including shell-obfuscated invocations (`cd /tmp && nmap OOS`, `X=1 nmap OOS`, `echo OOS | xargs nmap`). Treat this as **defense-in-depth, not an absolute boundary**: it cannot read targets hidden inside files (`-iL targets.txt`) and is not a substitute for network-level egress controls — stay within declared scope regardless. Structured progress lives in the resumable, scope-guarded ledger `tools/engagement-state.py` (`state.json`), which also drops out-of-scope discoveries. Commands: `docs/operations.md`.
 
 ## Agent Architecture
 

@@ -166,6 +166,57 @@ def test_scope_check_blocks_out_of_scope(tmp_path):
     assert r.returncode == 2                        # 2 = blocked
 
 
+# Shell-obfuscated out-of-scope commands that a naive prefix/token-0 check let
+# through — each MUST now be blocked by the shlex-based parser.
+_SCOPE_BYPASS_VECTORS = [
+    "cd /tmp && nmap evil.com",          # operator-chained after a safe prefix
+    "git status; nmap evil.com",         # statement separator
+    "X=1 nmap evil.com",                 # leading env-var assignment
+    'bash -c "nmap evil.com"',           # shell -c wrapper
+    "H=evil.com; nmap $H",               # variable resolution
+    "echo evil.com | xargs nmap",        # target piped into the scanner
+    "timeout 30 nmap evil.com",          # arg-consuming wrapper
+    "sudo nmap -sV evil.com",            # simple wrapper
+    "nohup nmap evil.com &",             # background + wrapper
+    "nmap $(echo evil.com)",             # command substitution
+]
+
+
+@pytest.mark.parametrize("cmd", _SCOPE_BYPASS_VECTORS)
+def test_scope_check_blocks_obfuscated_bypasses(tmp_path, cmd):
+    (tmp_path / "engagement.json").write_text(json.dumps(
+        {"in_scope": ["acme.com"], "out_of_scope": []}))
+    env = {**os.environ, "OUTPUT_DIR": str(tmp_path)}
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
+    r = subprocess.run([PY, str(TOOLS / "scope-check.py")], input=payload,
+                       capture_output=True, text=True, cwd=REPO, env=env, timeout=TIMEOUT)
+    assert r.returncode == 2, f"bypass NOT blocked: {cmd}"
+
+
+# In-scope / benign commands that MUST still be allowed (no false positives).
+_SCOPE_ALLOW_VECTORS = [
+    "nmap acme.com",
+    "cd /tmp && nmap acme.com",
+    "echo acme.com | xargs nmap",
+    "gobuster dir -u https://acme.com -w /usr/share/wl.txt",   # subcommand != host
+    "nmap acme.com 2> /tmp/out.txt",                            # redirect noise
+    "cat targets.txt | xargs nmap",                             # file contents unseen
+    "curl -s https://api.github.com/repos/x",                   # always-allowed infra
+    "git status",
+]
+
+
+@pytest.mark.parametrize("cmd", _SCOPE_ALLOW_VECTORS)
+def test_scope_check_allows_in_scope_and_benign(tmp_path, cmd):
+    (tmp_path / "engagement.json").write_text(json.dumps(
+        {"in_scope": ["acme.com"], "out_of_scope": []}))
+    env = {**os.environ, "OUTPUT_DIR": str(tmp_path)}
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
+    r = subprocess.run([PY, str(TOOLS / "scope-check.py")], input=payload,
+                       capture_output=True, text=True, cwd=REPO, env=env, timeout=TIMEOUT)
+    assert r.returncode == 0, f"false positive (blocked): {cmd}"
+
+
 # ── 9. Read-only memory tools (tolerate shared memory.db, no mutation) ─────────
 
 def test_session_memory_list():

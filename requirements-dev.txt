@@ -1,0 +1,7 @@
+# Tzar-Bot — development / CI dependencies
+#
+# The smoke suite is hermetic (no network, no browser, isolated SQLite DBs) and
+# needs nothing but pytest. Run:
+#   python3 -m pytest tools/tests/ -q
+
+pytest>=7.4

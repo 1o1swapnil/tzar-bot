@@ -16,6 +16,7 @@ import sys
 import os
 import re
 import json
+import shlex
 import ipaddress
 from pathlib import Path
 
@@ -114,21 +115,6 @@ def _load_extra_prefixes() -> tuple:
 SAFE_PREFIXES = _load_extra_prefixes()
 
 
-def load_scope(output_dir: str) -> list[str]:
-    """Load scope list from engagement.json."""
-    meta_path = Path(output_dir) / "engagement.json"
-    if not meta_path.exists():
-        return []
-    try:
-        meta = json.loads(meta_path.read_text())
-        scope = meta.get("scope", [])
-        if isinstance(scope, str):
-            scope = [s.strip() for s in scope.split(",")]
-        return [str(s).strip().lower() for s in scope if s]
-    except Exception:
-        return []
-
-
 def extract_urls(command: str) -> list[str]:
     """Extract http(s):// URLs from a command string."""
     return re.findall(r'https?://([a-zA-Z0-9._-]+)', command)
@@ -147,55 +133,249 @@ def extract_ips(command: str) -> list[str]:
     return valid
 
 
-def extract_scanning_targets(command: str) -> list[str]:
-    """
-    For known scanning tools, extract bare hostnames / IPs that appear
-    as positional arguments (not flag values like -o or --output).
-    """
-    targets = []
-    tokens = command.split()
-    if not tokens:
-        return []
-    tool = Path(tokens[0]).name.lower()
-    if tool not in SCANNING_TOOLS:
-        return []
+# ── Shell-aware command parsing ──────────────────────────────────────────────
+# The hook tokenizes each command with shlex, splits it on shell operators into
+# individual command stages, strips env-var assignments and command wrappers
+# (sudo, env, timeout, xargs, bash -c …), resolves simple $VAR references, then
+# checks EACH stage independently. This closes the trivial bypasses that a naive
+# "does the whole line start with a scanning tool" check leaves wide open:
+#   cd /tmp && nmap OOS   ·   git status; nmap OOS   ·   X=1 nmap OOS
+#   bash -c "nmap OOS"    ·   H=OOS; nmap $H          ·   echo OOS | xargs nmap
 
-    skip_next = False
-    value_flags = {
-        "-p", "--port", "-o", "--output", "-oN", "-oX", "-oG", "-oA",
-        "-w", "--wordlist", "-H", "--header", "-b", "--cookie",
-        "-e", "--extensions", "-t", "--threads", "-r", "--rate",
-        "--tamper", "--dbms", "--level", "--risk", "--tech",
-        "--timeout", "--delay", "--retries", "--proxy",
-        "-d", "--data", "--body", "--filter-status", "--filter-size",
-        "--mc", "--fc", "--fw", "--fl", "--mr", "--fr",
-        "-u", "--url",           # handled separately — these ARE targets for some tools
-        "--host", "--target",    # handled separately
-        "-iL", "--input-file",
-        "--bssid", "--essid", "--channel", "--interface",
-    }
-    target_flags = {"-u", "--url", "--host", "--target"}
-    # Note: -t intentionally excluded — it means --threads in ffuf/gobuster/nuclei
+STMT_SEPS = {";", "&", "&&", "||"}
 
-    i = 1
+# Network/scanning binaries: their presence in a stage (or anywhere in the same
+# pipeline) means bare host-like tokens should be treated as targets.
+NET_TOOLS = {
+    "curl", "wget", "nc", "ncat", "netcat", "telnet", "ssh", "sshpass",
+    "ftp", "tftp", "wpscan", "sslscan", "sslyze", "testssl.sh",
+}
+SCAN_OR_NET = SCANNING_TOOLS | NET_TOOLS
+
+# Command wrappers: the real command follows them.
+SIMPLE_WRAPPERS = {"sudo", "doas", "nohup", "setsid", "stdbuf", "time",
+                   "command", "builtin", "exec", "nice", "ionice"}
+ARG_WRAPPERS = {"timeout", "watch", "xargs", "env"}     # consume some leading args
+SHELL_WRAPPERS = {"bash", "sh", "zsh", "dash", "ksh", "ash"}   # -c "<script>"
+
+# Token last-labels that are local files, not network hosts.
+FILE_EXTS = {
+    "txt", "md", "py", "json", "log", "html", "htm", "js", "css", "sh", "csv",
+    "xml", "yaml", "yml", "conf", "cfg", "ini", "png", "jpg", "jpeg", "gif",
+    "svg", "pdf", "zip", "gz", "tar", "tgz", "bak", "db", "sqlite", "pem",
+    "key", "crt", "cer", "pcap", "pcapng", "har", "out", "tmp", "lst",
+    "nmap", "gnmap",
+}
+
+ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+_DURATION_RE = re.compile(r"^\d+(?:\.\d+)?[smhdSMHD]?$")
+
+VALUE_FLAGS = {
+    "-p", "--port", "-o", "--output", "-oN", "-oX", "-oG", "-oA",
+    "-w", "--wordlist", "-H", "--header", "-b", "--cookie",
+    "-e", "--extensions", "-t", "--threads", "-r", "--rate",
+    "--tamper", "--dbms", "--level", "--risk", "--tech",
+    "--timeout", "--delay", "--retries", "--proxy",
+    "-d", "--data", "--body", "--filter-status", "--filter-size",
+    "--mc", "--fc", "--fw", "--fl", "--mr", "--fr",
+    "-u", "--url", "--host", "--target",        # also target flags (handled below)
+    "-iL", "--input-file",
+    "--bssid", "--essid", "--channel", "--interface",
+}
+TARGET_FLAGS = {"-u", "--url", "--host", "--target"}
+XARGS_VALUE_FLAGS = {"-I", "-i", "-n", "-P", "-d", "-E", "-s", "-L", "-a", "-l"}
+
+
+def _basename(tok: str) -> str:
+    return Path(tok).name.lower()
+
+
+def _lex(line: str):
+    """shlex-tokenize a single line, keeping shell operators as their own tokens.
+    Returns None if the line cannot be parsed (caller falls back to raw scan)."""
+    try:
+        lex = shlex.shlex(line, posix=True, punctuation_chars=";&|<>()")
+        lex.whitespace_split = True
+        return list(lex)
+    except ValueError:
+        return None
+
+
+def _subst(tok: str, env: dict) -> str:
+    return _VAR_RE.sub(lambda m: env.get(m.group(1) or m.group(2), m.group(0)), tok)
+
+
+def _strip_assignments(tokens, env):
+    """Pop leading NAME=VALUE tokens into env; return the remaining tokens."""
+    i = 0
+    while i < len(tokens) and ASSIGN_RE.match(tokens[i]):
+        name, _, val = tokens[i].partition("=")
+        env[name] = val
+        i += 1
+    return tokens[i:]
+
+
+def _unwrap(tokens):
+    """Strip command wrappers (sudo/env/timeout/xargs/bash -c …).
+    Returns (effective_tokens, inner_shell_script_or_None)."""
+    tokens = list(tokens)
+    for _ in range(12):                            # depth guard
+        if not tokens:
+            return tokens, None
+        head = _basename(tokens[0])
+        if head in SHELL_WRAPPERS:
+            if "-c" in tokens:
+                ci = tokens.index("-c")
+                if ci + 1 < len(tokens):
+                    return [], tokens[ci + 1]      # re-parse the inner script
+            tokens = tokens[1:]
+            continue
+        if head in SIMPLE_WRAPPERS:
+            tokens = tokens[1:]
+            while tokens and tokens[0].startswith("-"):
+                f = tokens[0]
+                tokens = tokens[1:]
+                if f in ("-n", "-p", "-c") and tokens:
+                    tokens = tokens[1:]
+            continue
+        if head in ARG_WRAPPERS:
+            tokens = tokens[1:]
+            while tokens and tokens[0].startswith("-"):
+                f = tokens[0]
+                tokens = tokens[1:]
+                if f in XARGS_VALUE_FLAGS and tokens and not tokens[0].startswith("-"):
+                    tokens = tokens[1:]
+            if head == "env":
+                while tokens and ASSIGN_RE.match(tokens[0]):
+                    tokens = tokens[1:]
+            elif head in ("timeout", "watch") and tokens and _DURATION_RE.match(tokens[0]):
+                tokens = tokens[1:]
+            continue
+        break
+    return tokens, None
+
+
+def _looks_like_host(tok: str) -> bool:
+    """Strict host test for pipeline harvesting: a domain (dot + alpha TLD that
+    isn't a file extension) or a valid IP — never a bare word or filename."""
+    tok = tok.strip().strip(",;'\"")
+    if not tok or tok.startswith("-") or tok.isdigit():
+        return False
+    host = host_of(tok)
+    if not host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    if "." not in host:
+        return False
+    last = host.rsplit(".", 1)[-1]
+    return last.isalpha() and len(last) >= 2 and last not in FILE_EXTS
+
+
+def _is_local_path_or_file(tok: str) -> bool:
+    if tok.startswith(("/", "./", "../", "~/")):
+        return True
+    base = tok.split("/")[-1]
+    if "." in base and base.rsplit(".", 1)[-1].lower() in FILE_EXTS:
+        return True
+    return False
+
+
+def _positional_targets(tokens):
+    """Positional (non-flag) args of a scanning/net tool that look like targets."""
+    targets, i, skip = [], 1, False
     while i < len(tokens):
         tok = tokens[i]
-        if skip_next:
-            skip_next = False
-            i += 1
-            continue
-        if tok in target_flags and i + 1 < len(tokens):
-            targets.append(tokens[i + 1])
-            skip_next = True
-        elif tok in value_flags:
-            skip_next = True
+        if skip:
+            skip = False
+        elif tok in TARGET_FLAGS and i + 1 < len(tokens):
+            targets.append(tokens[i + 1]); skip = True
+        elif tok in VALUE_FLAGS:
+            skip = True
         elif tok.startswith("-"):
-            pass  # other flags
-        else:
+            pass
+        elif _looks_like_host(tok):
+            # bare positional: only a target if it is a dotted host or IP, so
+            # tool subcommands (gobuster dir, amass enum) aren't mistaken for hosts
             targets.append(tok)
         i += 1
-
     return targets
+
+
+def _segment(tokens):
+    """Split a flat token list into pipelines (list of stages, each a token list).
+    Parens are dropped (subshell grouping); redirect tokens fall through as noise
+    that the host filters below discard."""
+    pipelines, pipeline, stage = [], [], []
+    for tok in tokens:
+        if tok in ("(", ")"):
+            continue
+        if tok in STMT_SEPS:
+            if stage:
+                pipeline.append(stage); stage = []
+            if pipeline:
+                pipelines.append(pipeline); pipeline = []
+        elif tok == "|":
+            if stage:
+                pipeline.append(stage); stage = []
+        else:
+            stage.append(tok)
+    if stage:
+        pipeline.append(stage)
+    if pipeline:
+        pipelines.append(pipeline)
+    return pipelines
+
+
+def _collect_candidates(command: str, env: dict, depth: int = 0) -> list[str]:
+    """Walk the command shell-aware and return raw candidate target strings."""
+    candidates = []
+    if depth > 4:                                  # recursion guard for bash -c chains
+        return candidates
+    for line in command.replace("\r", "\n").split("\n"):
+        if not line.strip():
+            continue
+        tokens = _lex(line)
+        if tokens is None:                         # unparseable — conservative fallback
+            candidates += extract_urls(line) + extract_ips(line)
+            rough = re.findall(r"[A-Za-z0-9._:/-]+", line)
+            if any(_basename(t) in SCAN_OR_NET for t in rough):
+                candidates += [t for t in rough if _looks_like_host(t)]
+            continue
+        for pipeline in _segment(tokens):
+            stages = []
+            for raw_stage in pipeline:
+                sub = [_subst(t, env) for t in raw_stage]
+                cmd_tokens = _strip_assignments(sub, env)
+                if not cmd_tokens:
+                    continue
+                safe_str = " ".join(cmd_tokens)
+                safe = any(safe_str.startswith(p) for p in SAFE_PREFIXES)
+                eff_tokens, inner = _unwrap(cmd_tokens)
+                if inner is not None:              # bash -c "<script>": recurse
+                    candidates += _collect_candidates(inner, env, depth + 1)
+                eff_cmd = _basename(eff_tokens[0]) if eff_tokens else ""
+                stages.append({"tokens": cmd_tokens, "eff": eff_tokens,
+                               "cmd": eff_cmd, "safe": safe})
+            has_scanner = any(s["cmd"] in SCAN_OR_NET for s in stages)
+            for s in stages:
+                # Harvest host-like tokens from EVERY stage of a pipeline that
+                # contains a scanner — even safe-prefixed ones — so a target fed
+                # through a pipe (echo OOS | xargs nmap) is still caught.
+                if has_scanner:
+                    candidates += [t for t in s["tokens"] if _looks_like_host(t)]
+                if s["safe"]:
+                    continue
+                stage_str = " ".join(s["tokens"])
+                candidates += extract_urls(stage_str)
+                candidates += extract_ips(stage_str)
+                if s["cmd"] in SCAN_OR_NET:
+                    candidates += _positional_targets(s["eff"])
+    return candidates
 
 
 def _always_ok(host: str) -> bool:
@@ -215,25 +395,19 @@ def _always_ok(host: str) -> bool:
 
 def check_command(command: str, scope: "Scope") -> tuple[bool, str]:
     """
-    Returns (allowed, reason). Host/IP/CIDR decisions are delegated to the
-    code-enforced Scope class (deny-wins, default-deny); this function only adds
-    tzar-bot's safe-prefix and always-allowed-infra layers on top.
+    Returns (allowed, reason). The command is parsed shell-aware (see
+    _collect_candidates): split on operators, wrappers/assignments stripped,
+    $VARs resolved, each stage checked independently. Host/IP/CIDR decisions are
+    delegated to the code-enforced Scope class (deny-wins, default-deny); this
+    function adds tzar-bot's per-stage safe-prefix and always-allowed-infra
+    layers on top.
     """
-    # Skip safe prefixes
-    stripped = command.strip()
-    for prefix in SAFE_PREFIXES:
-        if stripped.startswith(prefix):
-            return True, "safe prefix"
-
     # No active scope — engagement not initialised, allow everything
     if not scope.active:
         return True, "no active scope"
 
-    # Collect candidate targets, normalise each to a host, dedupe
-    candidates = []
-    candidates += extract_urls(command)
-    candidates += extract_ips(command)
-    candidates += extract_scanning_targets(command)
+    # Collect candidate targets shell-aware, normalise each to a host, dedupe
+    candidates = _collect_candidates(command, {})
 
     violations = []
     seen = set()

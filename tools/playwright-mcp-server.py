@@ -32,9 +32,65 @@ import os
 import json
 import traceback
 from pathlib import Path
+from urllib.parse import urlparse
 
 TOOLS_DIR = Path(__file__).parent.resolve()
 REPO_DIR  = TOOLS_DIR.parent
+
+# Reuse the single code-enforced scope authority (same module the Bash
+# PreToolUse hook uses) so the browser is a first-class scope citizen.
+sys.path.insert(0, str(TOOLS_DIR))
+from scope import Scope, host_of  # noqa: E402
+
+# Web-only: every other scheme (file:, chrome:, data:, ftp:, …) is a local
+# file-read / internal-resource vector and is never a legitimate target here.
+_ALLOWED_SCHEMES = {"http", "https", "about"}
+
+# Cloud-metadata endpoints — never a legitimate browser target unless the
+# engagement explicitly scopes them in.
+_METADATA_HOSTS = {
+    "169.254.169.254", "fd00:ec2::254",          # AWS / GCP / Azure IMDS
+    "100.100.200.200",                            # Alibaba
+    "metadata", "metadata.google.internal",       # GCP by name
+}
+
+
+def _load_scope() -> Scope:
+    """Load engagement scope from $OUTPUT_DIR/engagement.json (same as the hook)."""
+    output_dir = os.environ.get("OUTPUT_DIR", "")
+    if output_dir:
+        meta = Path(output_dir) / "engagement.json"
+        if meta.exists():
+            try:
+                return Scope.load(meta)
+            except Exception:
+                pass
+    return Scope()
+
+
+def _guard_url(url: str):
+    """Return None if the browser may visit `url`, else a human-readable reason.
+
+    Deny-wins / default-deny, delegated to scope.py — identical semantics to the
+    Bash scope-check hook, which does NOT see MCP calls. Hard blocks (non-web
+    schemes, cloud-metadata IPs) apply even when no engagement scope is active.
+    """
+    if not url or not url.strip():
+        return "empty URL"
+    parsed = urlparse(url if "://" in url else "//" + url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme and scheme not in _ALLOWED_SCHEMES:
+        return f"non-web scheme '{scheme}:' is blocked (only http/https allowed)"
+    host = host_of(url)
+    if not host:
+        return "could not parse host from URL"
+    scope = _load_scope()
+    if host in _METADATA_HOSTS and not scope.in_scope_host(url):
+        return f"{host} is a cloud-metadata endpoint — blocked"
+    if scope.active:
+        return scope.reject_reason(url)   # None when in scope
+    return None
+
 
 # ── Browser state (lives for the lifetime of the server process) ──────────────
 _playwright = None
@@ -93,9 +149,14 @@ def tool_browser_launch(args: dict) -> tuple[str, bool]:
         pass
     _playwright = _browser = _context = _page = None
 
+    url = args.get("url", "")
+    if url:
+        reason = _guard_url(url)
+        if reason:
+            return f"BLOCKED (scope): {reason}", True
+
     headless = args.get("headless", True)
     _ensure_browser(headless=headless)
-    url = args.get("url", "")
     if url:
         _page.goto(url, wait_until="domcontentloaded", timeout=30000)
         return f"Browser launched. Navigated to: {_page.url}\nTitle: {_page.title()}", False
@@ -103,8 +164,11 @@ def tool_browser_launch(args: dict) -> tuple[str, bool]:
 
 
 def tool_browser_navigate(args: dict) -> tuple[str, bool]:
-    _ensure_browser()
     url      = args["url"]
+    reason = _guard_url(url)
+    if reason:
+        return f"BLOCKED (scope): {reason}", True
+    _ensure_browser()
     wait_for = args.get("wait_for", "domcontentloaded")
     _page.goto(url, wait_until=wait_for, timeout=30000)
     return f"Navigated to: {_page.url}\nTitle: {_page.title()}", False
@@ -253,6 +317,10 @@ def tool_browser_export_har(args: dict) -> tuple[str, bool]:
     output_dir = args.get("output_dir", "")
     name       = args.get("name", "capture")
     url        = args.get("url", _page.url)
+
+    reason = _guard_url(url)
+    if reason:
+        return f"BLOCKED (scope): {reason}", True
 
     if output_dir:
         har_path = Path(output_dir) / "artifacts" / f"{name}.har"

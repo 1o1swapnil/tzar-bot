@@ -247,6 +247,105 @@ def build_system_prompt(scope: Scope):
     return "\n".join(parts)
 
 
+# ── adversarial validator (milestone 3) ──────────────────────────────────────
+#
+# A finding is only "confirmed" if it survives BOTH the mechanical pre-check
+# (validate-finding.py, 5 checks) AND a panel of independent refuters. Each
+# refuter runs in its OWN conversation with a distinct lens and is prompted to
+# REFUTE — so they cannot rubber-stamp each other or the executor. Structured
+# outputs guarantee a valid verdict. This is the #1 defense against hallucinated
+# findings, which is the single biggest trust lever for the product.
+
+MODEL_VALIDATOR = "claude-sonnet-4-6"
+
+VERDICT_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["is_real", "confidence", "reasoning"],
+    "properties": {
+        "is_real": {"type": "boolean",
+                    "description": "True only if the finding is genuinely exploitable as written"},
+        "confidence": {"type": "number", "description": "0.0-1.0"},
+        "reasoning": {"type": "string"},
+    },
+}
+
+# Distinct lenses → perspective-diverse verification (not N identical refuters).
+LENSES = ["correctness", "reproducibility", "impact", "false-positive-likelihood"]
+
+
+class Validator:
+    """Mechanical pre-check + adversarial refuter panel → validated | false-positive.
+
+    judge_fn(finding_text, lens) -> verdict dict   and   mechanical_fn(finding_dir)
+    -> (passed, output) are injectable so the vote/routing logic is testable with
+    no SDK, key, or network.
+    """
+
+    def __init__(self, output_dir, votes=3, judge_fn=None, mechanical_fn=None,
+                 model=MODEL_VALIDATOR):
+        self.output_dir = output_dir
+        self.votes = max(1, votes)
+        self.model = model
+        self.judge_fn = judge_fn or self._api_judge
+        self.mechanical_fn = mechanical_fn or self._default_mechanical
+        self._client = None
+
+    def _default_mechanical(self, finding_dir):
+        r = subprocess.run([sys.executable, str(TOOLS_DIR / "validate-finding.py"),
+                            "--", str(finding_dir)], capture_output=True, text=True)
+        return r.returncode == 0, (r.stdout + r.stderr).strip()
+
+    def _api_judge(self, finding_text, lens):
+        import anthropic
+        if self._client is None:
+            self._client = anthropic.Anthropic(api_key=read_env_key())
+        prompt = (
+            f"You are an adversarial security reviewer. Try to REFUTE the finding below "
+            f"through the '{lens}' lens. Default to is_real=false if you are uncertain or "
+            f"if the evidence does not clearly prove exploitability.\n\n--- FINDING ---\n"
+            f"{_scrub(finding_text)[:12000]}")
+        resp = self._client.messages.create(
+            model=self.model, max_tokens=2000,
+            output_config={"format": {"type": "json_schema", "schema": VERDICT_SCHEMA}},
+            messages=[{"role": "user", "content": prompt}])
+        text = next((b.text for b in resp.content if b.type == "text"), "{}")
+        return json.loads(text)
+
+    def validate(self, finding_dir):
+        finding_dir = Path(finding_dir)
+        name = finding_dir.name or "finding"
+        desc = finding_dir / "description.md"
+        text = desc.read_text(encoding="utf-8") if desc.is_file() else ""
+
+        mech_ok, mech_out = self.mechanical_fn(finding_dir)
+        lenses = [LENSES[i % len(LENSES)] for i in range(self.votes)]
+        verdicts = [self.judge_fn(text, lens) for lens in lenses]
+        real_votes = sum(1 for v in verdicts if v.get("is_real"))
+        majority = real_votes > len(verdicts) // 2          # strict majority
+        confirmed = bool(mech_ok and majority)
+        route = "validated" if confirmed else "false-positives"
+
+        record = {"finding": name, "confirmed": confirmed,
+                  "mechanical_passed": mech_ok, "real_votes": real_votes,
+                  "total_votes": len(verdicts),
+                  "verdicts": [dict(lens=l, **v) for l, v in zip(lenses, verdicts)],
+                  "mechanical_output": mech_out}
+        try:
+            path = safe_output_path(self.output_dir or str(REPO_DIR),
+                                    "artifacts", route, f"{name}.json")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+            record["written_to"] = str(path)
+        except ValueError as e:
+            record["write_error"] = str(e)
+        return confirmed, record
+
+    def validate_all(self):
+        findings = sorted((Path(self.output_dir) / "findings").glob("*/")) \
+            if self.output_dir else []
+        return [self.validate(d) for d in findings if (d / "description.md").is_file()]
+
+
 # ── the coordinator loop (live; needs the SDK + API key) ──────────────────────
 
 def run_coordinator(scope, output_dir, target, live, budget_out_tokens):
@@ -338,14 +437,44 @@ def selftest():
     assert not err and (Path(out) / "findings" / "finding-001" / "description.md").is_file()
     # audit log recorded decisions
     assert (Path(out) / "audit.log").is_file()
+
+    # --- adversarial validator (injected judge + mechanical, no SDK) -----------
+    real = lambda txt, lens: {"is_real": True, "confidence": 0.9, "reasoning": lens}
+    fake = lambda txt, lens: {"is_real": False, "confidence": 0.9, "reasoning": lens}
+    mech_pass = lambda d: (True, "ok")
+    mech_fail = lambda d: (False, "check 2 failed")
+
+    # majority real + mechanical pass -> confirmed -> validated/
+    ok, rec = Validator(out, votes=3, judge_fn=real, mechanical_fn=mech_pass).validate(
+        Path(out) / "findings" / "finding-001")
+    assert ok and rec["confirmed"] and "validated" in rec["written_to"]
+    assert (Path(out) / "artifacts" / "validated" / "finding-001.json").is_file()
+    # majority refuted -> false positive even if mechanical passes
+    ok, rec = Validator(out, votes=3, judge_fn=fake, mechanical_fn=mech_pass).validate(
+        Path(out) / "findings" / "finding-001")
+    assert (not ok) and "false-positives" in rec["written_to"]
+    # mechanical fail gates it out even if the panel believes it
+    ok, _ = Validator(out, votes=3, judge_fn=real, mechanical_fn=mech_fail).validate(
+        Path(out) / "findings" / "finding-001")
+    assert not ok
+    # split vote (1 of 3 real) is NOT a majority -> false positive
+    flip = [real, fake, fake]
+    ok, _ = Validator(out, votes=3, mechanical_fn=mech_pass,
+                      judge_fn=lambda t, l: flip.pop(0)(t, l)).validate(
+        Path(out) / "findings" / "finding-001")
+    assert not ok
+
     print("engagement-runner selftest: PASS")
 
 
 def main():
     ap = argparse.ArgumentParser(description="Autonomous engagement runner (MVP).")
-    ap.add_argument("command", nargs="?", default="run", choices=["run", "selftest"])
+    ap.add_argument("command", nargs="?", default="run",
+                    choices=["run", "selftest", "validate"])
     ap.add_argument("--selftest", action="store_true", help="alias for the selftest command")
     ap.add_argument("--output-dir", default=os.environ.get("OUTPUT_DIR", ""))
+    ap.add_argument("--finding", default="", help="finding dir to validate (validate command)")
+    ap.add_argument("--votes", type=int, default=3, help="refuter panel size (validate)")
     ap.add_argument("--target", default="")
     ap.add_argument("--in-scope", default=None, help="comma-separated in-scope rules (override)")
     ap.add_argument("--out-of-scope", default=None)
@@ -356,6 +485,19 @@ def main():
 
     if a.selftest or a.command == "selftest":
         selftest()
+        return 0
+
+    if a.command == "validate":
+        v = Validator(a.output_dir, votes=a.votes)
+        results = [v.validate(a.finding)] if a.finding else v.validate_all()
+        if not results:
+            print("no findings to validate.", file=sys.stderr)
+            return 1
+        for confirmed, rec in results:
+            verdict = "CONFIRMED" if confirmed else "FALSE POSITIVE"
+            print(f"{verdict:14} {rec['finding']}  "
+                  f"({rec['real_votes']}/{rec['total_votes']} votes, "
+                  f"mechanical={'pass' if rec['mechanical_passed'] else 'fail'})")
         return 0
 
     # Build scope from engagement.json (preferred) or explicit flags.

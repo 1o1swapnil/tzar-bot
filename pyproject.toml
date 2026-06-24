@@ -33,8 +33,11 @@ dependencies = []
 pdf = ["reportlab>=4.0", "Pillow>=10.0"]          # generate-report.py — PDF reports
 docx = ["python-docx>=1.1"]                        # md-to-docx.py — DOCX export
 browser = ["playwright>=1.40"]                     # playwright-mcp-server.py
+# engagement-runner.py live loop — SDK must be new enough for output_config.format
+# (structured outputs) + adaptive thinking + the current Opus/Sonnet model IDs.
+runner = ["anthropic>=0.69"]
 dev = ["pytest>=7.4"]
-all = ["reportlab>=4.0", "Pillow>=10.0", "python-docx>=1.1", "playwright>=1.40"]
+all = ["reportlab>=4.0", "Pillow>=10.0", "python-docx>=1.1", "playwright>=1.40", "anthropic>=0.69"]
 
 [project.urls]
 Homepage = "https://github.com/1o1swapnil/tzar-bot"

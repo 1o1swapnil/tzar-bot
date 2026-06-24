@@ -54,25 +54,27 @@ def run(args, stdin=None, env=None, cwd=REPO):
     )
 
 
-def tool(name, *cli):
-    return run([PY, str(TOOLS / name), *cli])
+def tool(name, *cli, env=None):
+    return run([PY, str(TOOLS / name), *cli], env=env)
 
 
 # ── JSON-RPC (MCP) helper ─────────────────────────────────────────────────────
 
 def _frame(obj):
-    b = json.dumps(obj).encode()
-    return f"Content-Length: {len(b)}\r\n\r\n".encode() + b
+    # Newline-delimited JSON-RPC (MCP stdio framing, per the servers since e70f2f0)
+    return json.dumps(obj).encode() + b"\n"
 
 
 def _parse_frames(raw: bytes):
-    msgs, buf = [], raw
-    while buf.startswith(b"Content-Length:"):
-        hdr_end = buf.index(b"\r\n\r\n")
-        length = int(buf[len("Content-Length:"):hdr_end].strip())
-        start = hdr_end + 4
-        msgs.append(json.loads(buf[start:start + length]))
-        buf = buf[start + length:]
+    msgs = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msgs.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue  # skip any non-JSON log lines
     return msgs
 
 
@@ -113,9 +115,18 @@ def test_engagement_state_selftest():
 # ── 4. Credential reader (no .env required) ───────────────────────────────────
 
 def test_env_reader_unset_var():
-    r = tool("env-reader.py", "TZAR_SMOKE_UNSET_VAR")
+    # Allow-listed (via env override) but unset → NOT_SET, exit 0
+    env = {**os.environ, "TZAR_ENV_ALLOWLIST": "TZAR_SMOKE_UNSET_VAR"}
+    r = tool("env-reader.py", "TZAR_SMOKE_UNSET_VAR", env=env)
     assert r.returncode == 0
     assert "TZAR_SMOKE_UNSET_VAR=NOT_SET" in r.stdout
+
+
+def test_env_reader_denies_unlisted_var():
+    # Not on any allow-list → DENIED, value never read, exit 3 (prompt-injection guard)
+    r = tool("env-reader.py", "TZAR_SMOKE_SECRET_XYZ")
+    assert r.returncode == 3
+    assert "TZAR_SMOKE_SECRET_XYZ=DENIED" in r.stdout
 
 
 # ── 5. Prompt-injection scrubber ──────────────────────────────────────────────

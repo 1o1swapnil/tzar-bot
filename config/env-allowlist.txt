@@ -1,0 +1,36 @@
+# config/env-allowlist.txt — operator-maintained allow-list for env-reader.py
+#
+# env-reader.py is the ONLY approved way to read secrets (for both the MCP
+# read_env tool and Bash callers). Only variable names matching this list (or a
+# key declared in .env.example) may be read; anything else is refused as DENIED
+# and its value is never touched. This blocks prompt-injection-driven reads of
+# arbitrary environment variables (e.g. AWS_SECRET_ACCESS_KEY, SSH keys).
+#
+# These are MERGED ON TOP of the keys declared in .env.example — this file only
+# adds; it never removes. Missing file = .env.example keys only.
+#
+# Rules:
+#   - one variable name OR fnmatch glob per line (case-sensitive)
+#   - globs: USER_*_TOKEN matches USER_A_TOKEN, USER_B_TOKEN, ...
+#   - lines starting with '#' and blank lines are ignored
+#   - override per-invocation with $TZAR_ENV_ALLOWLIST (comma-separated)
+#   - point elsewhere with $TZAR_ENV_ALLOWLIST_FILE
+#
+# Keep entries tight — a broad glob like *_TOKEN defeats the purpose.
+
+# ── Engagement-specific credentials (IDOR / auth / multi-user testing) ──
+TARGET_API_TOKEN
+USER_*_TOKEN
+ATTACKER_TOKEN
+ADMIN_TOKEN
+ACCESS_TOKEN
+AUTH_TOKEN
+
+# ── Tool / integration keys not declared in .env.example ──
+WPSCAN_API_TOKEN
+CHAOS_API_KEY
+GOPHISH_API_KEY
+MOBSF_KEY
+VIRUSTOTAL_API_KEY
+CENSYS_API_ID
+CENSYS_API_SECRET

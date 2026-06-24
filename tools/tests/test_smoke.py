@@ -108,6 +108,10 @@ def test_scope_selftest():
     assert tool("scope.py", "--selftest").returncode == 0
 
 
+def test_pathguard_selftest():
+    assert tool("pathguard.py").returncode == 0
+
+
 def test_engagement_state_selftest():
     assert tool("engagement-state.py", "selftest").returncode == 0
 

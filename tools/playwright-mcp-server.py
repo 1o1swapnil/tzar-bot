@@ -41,6 +41,7 @@ REPO_DIR  = TOOLS_DIR.parent
 # PreToolUse hook uses) so the browser is a first-class scope citizen.
 sys.path.insert(0, str(TOOLS_DIR))
 from scope import Scope, host_of  # noqa: E402
+from pathguard import safe_output_path  # noqa: E402  — contain writes to the engagement sandbox
 
 # Web-only: every other scheme (file:, chrome:, data:, ftp:, …) is a local
 # file-read / internal-resource vector and is never a legitimate target here.
@@ -206,16 +207,15 @@ def tool_browser_type(args: dict) -> tuple[str, bool]:
 def tool_browser_screenshot(args: dict) -> tuple[str, bool]:
     _ensure_browser()
     name       = args.get("name", "screenshot")
-    output_dir = args.get("output_dir", "")
+    output_dir = args.get("output_dir") or str(REPO_DIR)
     full_page  = args.get("full_page", False)
 
-    if output_dir:
-        save_dir = Path(output_dir) / "screenshots"
-    else:
-        save_dir = REPO_DIR / "screenshots"
-    save_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        path = safe_output_path(output_dir, "screenshots", f"{name}.png")
+    except ValueError as e:
+        return f"BLOCKED (path): {e}", True
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-    path = save_dir / f"{name}.png"
     _page.screenshot(path=str(path), full_page=full_page)
     return f"Screenshot saved: {path}\nURL: {_page.url}", False
 
@@ -285,8 +285,12 @@ def tool_browser_export_session(args: dict) -> tuple[str, bool]:
     }""")
 
     output_dir = args.get("output_dir", "")
+    saved_msg = ""
     if output_dir:
-        session_file = Path(output_dir) / "artifacts" / "browser-session.json"
+        try:
+            session_file = safe_output_path(output_dir, "artifacts", "browser-session.json")
+        except ValueError as e:
+            return f"BLOCKED (path): {e}", True
         session_file.parent.mkdir(parents=True, exist_ok=True)
         session_file.write_text(json.dumps({
             "cookies": cookies,
@@ -294,8 +298,6 @@ def tool_browser_export_session(args: dict) -> tuple[str, bool]:
             "session_storage": session_storage,
         }, indent=2))
         saved_msg = f"\nSaved to: {session_file}"
-    else:
-        saved_msg = ""
 
     result = {
         "curl_cookie_header": f"-H 'Cookie: {curl_cookie}'",
@@ -322,11 +324,11 @@ def tool_browser_export_har(args: dict) -> tuple[str, bool]:
     if reason:
         return f"BLOCKED (scope): {reason}", True
 
-    if output_dir:
-        har_path = Path(output_dir) / "artifacts" / f"{name}.har"
-        har_path.parent.mkdir(parents=True, exist_ok=True)
-    else:
-        har_path = REPO_DIR / f"{name}.har"
+    try:
+        har_path = safe_output_path(output_dir or str(REPO_DIR), "artifacts", f"{name}.har")
+    except ValueError as e:
+        return f"BLOCKED (path): {e}", True
+    har_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Open a new page with HAR recording
     har_page = _context.new_page()

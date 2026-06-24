@@ -112,6 +112,11 @@ def test_pathguard_selftest():
     assert tool("pathguard.py").returncode == 0
 
 
+def test_engagement_runner_selftest():
+    # Exercises the tool gate (scope / allowlist / path containment) with no SDK/network.
+    assert tool("engagement-runner.py", "--selftest").returncode == 0
+
+
 def test_engagement_state_selftest():
     assert tool("engagement-state.py", "selftest").returncode == 0
 

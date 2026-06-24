@@ -529,7 +529,13 @@ def read_message():
         line = raw.strip()
         if not line:
             continue  # skip blank lines between messages
-        return json.loads(line.decode("utf-8"))
+        try:
+            return json.loads(line.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # A malformed line must not crash the server — skip and keep serving.
+            sys.stderr.write("[playwright-mcp] skipping malformed JSON-RPC line\n")
+            sys.stderr.flush()
+            continue
 
 
 def send_message(obj):

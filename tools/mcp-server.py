@@ -33,7 +33,13 @@ def read_message():
         line = raw.strip()
         if not line:
             continue  # skip blank lines between messages
-        return json.loads(line.decode("utf-8"))
+        try:
+            return json.loads(line.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # A malformed line must not crash the server — skip and keep serving.
+            sys.stderr.write("[mcp] skipping malformed JSON-RPC line\n")
+            sys.stderr.flush()
+            continue
 
 
 def send_message(obj):
@@ -45,9 +51,16 @@ def send_message(obj):
 
 # ── subprocess helper ────────────────────────────────────────────────────────
 
-def run(cmd):
-    r = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_DIR)
-    return r.stdout, r.stderr, r.returncode
+TOOL_TIMEOUT = 120  # seconds — a hung child must never freeze the single-threaded server
+
+
+def run(cmd, stdin=None, env=None, timeout=TOOL_TIMEOUT):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_DIR,
+                           input=stdin, env=env, timeout=timeout)
+        return r.stdout, r.stderr, r.returncode
+    except subprocess.TimeoutExpired:
+        return "", f"tool timed out after {timeout}s", 124
 
 
 # ── tool schemas ─────────────────────────────────────────────────────────────
@@ -511,17 +524,13 @@ def tool_read_env(args):
 
 
 def tool_scope_check(args):
-    import subprocess as _sp
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": args["command"]}})
     env = dict(os.environ)
     if args.get("output_dir"):
         env["OUTPUT_DIR"] = args["output_dir"]
-    r = _sp.run(
-        [PYTHON, str(TOOLS_DIR / "scope-check.py")],
-        input=payload, capture_output=True, text=True, env=env
-    )
-    if r.returncode == 2:
-        return f"BLOCKED: {r.stderr.strip()}", True  # is_error=True signals the command was rejected
+    out, err, rc = run([PYTHON, str(TOOLS_DIR / "scope-check.py")], stdin=payload, env=env)
+    if rc == 2:
+        return f"BLOCKED: {err.strip()}", True  # is_error=True signals the command was rejected
     return "ALLOWED", False
 
 
@@ -610,11 +619,7 @@ def tool_token_meter(args):
         else:
             cmd.append(args.get("source", "-"))
     # list / pricing take no extra args
-    if stdin_input is not None:
-        r = subprocess.run(cmd, input=stdin_input, capture_output=True, text=True, cwd=REPO_DIR)
-        out, err, rc = r.stdout, r.stderr, r.returncode
-    else:
-        out, err, rc = run(cmd)
+    out, err, rc = run(cmd, stdin=stdin_input)
     return (out + (f"\n{err}" if err and rc != 0 else "")).strip(), rc != 0
 
 

@@ -199,7 +199,8 @@ def _scrub(text):
 
 # ── tool schemas exposed to the model ─────────────────────────────────────────
 
-COORDINATOR_TOOLS = [
+# Leaf tools — executor sub-agents use these; every call is gated by ToolGate.
+LEAF_TOOLS = [
     {"name": "run_scanner",
      "description": "Run an allow-listed security scanner against an in-scope target. "
                     "The harness enforces scope and an executable allowlist before running.",
@@ -230,21 +231,67 @@ COORDINATOR_TOOLS = [
 ]
 
 
+# Orchestration tools — the COORDINATOR uses only these. It plans and delegates;
+# it never scans inline (the CLAUDE.md coordinator hard-boundary, enforced in code
+# by simply not giving it the leaf tools). Executors do the gated scanning.
+COORDINATOR_TOOLS = [
+    {"name": "add_surface",
+     "description": "Record discovered attack surface so executors can test it. "
+                    "Out-of-scope items are dropped by the harness.",
+     "input_schema": {"type": "object", "additionalProperties": False,
+        "properties": {"items": {"type": "array", "items": {
+            "type": "object", "properties": {
+                "url": {"type": "string"}, "param": {"type": "string"},
+                "vuln_class": {"type": "string", "description": "e.g. idor, sqli, xss, ssrf"}},
+            "required": ["url", "vuln_class"]}}},
+        "required": ["items"]}},
+    {"name": "get_worklist",
+     "description": "Return the impact-ranked, still-untested attack surface.",
+     "input_schema": {"type": "object", "additionalProperties": False,
+        "properties": {"top": {"type": "integer", "description": "max items"}}}},
+    {"name": "delegate",
+     "description": "Delegate ONE surface item to an executor sub-agent. The executor "
+                    "claims the item (so no two executors test the same surface), runs the "
+                    "gated scanners, writes findings, and returns a summary.",
+     "input_schema": {"type": "object", "additionalProperties": False,
+        "properties": {"url": {"type": "string"}, "param": {"type": "string"},
+                       "vuln_class": {"type": "string"}},
+        "required": ["url", "vuln_class"]}},
+]
+
+
 def build_system_prompt(scope: Scope):
     """Coordinator system prompt = routing rules + a mounted skill. Stable → cacheable."""
     parts = [
-        "You are the autonomous coordinator for a tzar-bot web-application pentest.",
+        "You are the autonomous COORDINATOR for a tzar-bot web-application pentest.",
         "You are PRE-AUTHORIZED for this engagement. Stay strictly within scope; the "
-        "harness will deny any out-of-scope action, so plan around the declared scope.",
+        "harness denies any out-of-scope action, so plan around the declared scope.",
         f"In scope: {scope.in_scope}. Out of scope: {scope.out_of_scope}.",
-        "Work the phases: recon -> enumerate -> test -> validate -> report. Use run_scanner "
-        "and http_request to gather evidence, and write_finding for each confirmed issue. "
-        "Be efficient; do not repeat tests. When the engagement is complete, stop.",
+        "HARD RULE: you never scan or send requests yourself. You PLAN and DELEGATE. "
+        "Use add_surface to record discovered surface, get_worklist to see what is "
+        "untested, and delegate to hand one item at a time to an executor sub-agent "
+        "(which does the gated scanning and reports back). Work the phases recon -> "
+        "enumerate -> test -> report; do not re-delegate an item already tested. When "
+        "the worklist is exhausted and findings are recorded, stop.",
     ]
     skill = REPO_DIR / "skills" / "web-chain" / "SKILL.md"
     if skill.is_file():
         parts.append("\n\n# Methodology (web-chain skill)\n" + skill.read_text(encoding="utf-8"))
     return "\n".join(parts)
+
+
+def build_executor_prompt(scope: Scope, item):
+    """Executor system prompt — one focused surface item, the gated leaf tools."""
+    return (
+        "You are a tzar-bot EXECUTOR. You have been delegated ONE attack-surface item to "
+        "test. You are PRE-AUTHORIZED and strictly scope-bound; the harness denies any "
+        "out-of-scope or destructive action.\n"
+        f"In scope: {scope.in_scope}. Out of scope: {scope.out_of_scope}.\n"
+        f"Test exactly this item: {json.dumps(item)}\n"
+        "Use run_scanner / http_request to gather evidence; if you confirm a real, "
+        "exploitable issue, call write_finding with a clear PoC and impact. Do not test "
+        "anything outside this item. When done, stop with a one-line summary of the result."
+    )
 
 
 # ── adversarial validator (milestone 3) ──────────────────────────────────────
@@ -346,57 +393,172 @@ class Validator:
         return [self.validate(d) for d in findings if (d / "description.md").is_file()]
 
 
-# ── the coordinator loop (live; needs the SDK + API key) ──────────────────────
+# ── engagement state (worklist + work-claim dedup, milestone 2) ───────────────
+
+class EngagementState:
+    """Thin wrapper over engagement-state.py — the shared worklist + claims ledger
+    that lets executors fan out without two of them testing the same surface."""
+
+    def __init__(self, output_dir):
+        self.output_dir = output_dir
+
+    def _run(self, *args):
+        cmd = [sys.executable, str(TOOLS_DIR / "engagement-state.py")]
+        if self.output_dir:
+            cmd += ["--output-dir", str(self.output_dir)]
+        cmd += list(args)
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+    def add_surface(self, items):
+        return self._run("add-surface", "--json", json.dumps(items)).stdout.strip()
+
+    def worklist(self, top=None, agent=None):
+        args = ["worklist"]
+        if top is not None:
+            args += ["--top", str(top)]
+        if agent:
+            args += ["--agent", agent]
+        return self._run(*args).stdout.strip() or "(worklist empty)"
+
+    def claim(self, url, agent, param="", vuln_class=""):
+        r = self._run("claim", "--url", url, "--agent", agent,
+                      "--param", param, "--vuln-class", vuln_class)
+        return r.returncode == 0          # exit 0 = claimed, 1 = denied (held by another)
+
+    def release(self, url, agent, param="", vuln_class=""):
+        self._run("release", "--url", url, "--agent", agent,
+                  "--param", param, "--vuln-class", vuln_class)
+
+    def mark_tested(self, url, param="", vuln_class=""):
+        self._run("mark-tested", "--url", url, "--param", param, "--vuln-class", vuln_class)
+
+
+# ── executor sub-agent (milestone 2) ──────────────────────────────────────────
+
+class Executor:
+    """Tests ONE claimed surface item with the gated leaf tools, then marks it
+    tested and releases the claim. loop_fn(item) is injectable so the fan-out /
+    claim / dedup logic is testable with no SDK/network."""
+
+    def __init__(self, gate, state, scope, agent_id, client=None, live=False,
+                 loop_fn=None, budget_out_tokens=60000):
+        self.gate, self.state, self.scope = gate, state, scope
+        self.agent_id, self.client, self.live = agent_id, client, live
+        self.loop_fn = loop_fn or self._api_loop
+        self.budget = budget_out_tokens
+
+    def run(self, item):
+        url = item.get("url", "")
+        if not self.state.claim(url, self.agent_id, item.get("param", ""),
+                                item.get("vuln_class", "")):
+            return {"status": "skipped-claimed", "agent": self.agent_id, "item": item}
+        try:
+            summary = self.loop_fn(item)
+        finally:
+            self.state.mark_tested(url, item.get("param", ""), item.get("vuln_class", ""))
+            self.state.release(url, self.agent_id, item.get("param", ""),
+                               item.get("vuln_class", ""))
+        return {"status": "done", "agent": self.agent_id, "item": item, "summary": summary}
+
+    def _api_loop(self, item):
+        system = build_executor_prompt(self.scope, item)
+        messages = [{"role": "user", "content": "Test the delegated item now."}]
+        spent, last_text = 0, ""
+        while True:
+            resp = self.client.messages.create(
+                model=MODEL_EXECUTOR, max_tokens=8000,
+                thinking={"type": "adaptive"}, output_config={"effort": "medium"},
+                system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+                tools=LEAF_TOOLS, messages=messages)
+            spent += resp.usage.output_tokens
+            last_text = next((b.text for b in resp.content if b.type == "text"), last_text)
+            if resp.stop_reason in ("end_turn", "refusal") or spent >= self.budget:
+                break
+            messages.append({"role": "assistant", "content": resp.content})
+            results = [{"type": "tool_result", "tool_use_id": b.id,
+                        "content": (r := self.gate.dispatch(b.name, b.input))[0],
+                        "is_error": r[1]}
+                       for b in resp.content if b.type == "tool_use"]
+            if results:
+                messages.append({"role": "user", "content": results})
+        return last_text
+
+
+MODEL_EXECUTOR = "claude-sonnet-4-6"
+
+
+# ── the coordinator orchestrator (live; needs the SDK + API key) ──────────────
+
+class Engagement:
+    """Owns the coordinator loop. Routes leaf tools to the gate and orchestration
+    tools (add_surface / get_worklist / delegate) to itself; delegate spawns a
+    claiming Executor sub-agent."""
+
+    def __init__(self, scope, output_dir, client, live, budget_out_tokens):
+        self.scope, self.output_dir = scope, output_dir
+        self.client, self.live, self.budget = client, live, budget_out_tokens
+        self.gate = ToolGate(scope, output_dir, live=live)
+        self.state = EngagementState(output_dir)
+        self._exec_n = 0
+
+    def _coordinate_tool(self, name, args):
+        if name == "add_surface":
+            return self.state.add_surface(args.get("items", [])), False
+        if name == "get_worklist":
+            return self.state.worklist(top=args.get("top")), False
+        if name == "delegate":
+            self._exec_n += 1
+            ex = Executor(self.gate, self.state, self.scope,
+                          agent_id=f"exec-{self._exec_n}", client=self.client, live=self.live)
+            return json.dumps(ex.run(args)), False
+        return f"BLOCKED by gate: unknown coordinator tool {name!r}", True
+
+    def dispatch(self, name, args):
+        if name in ("add_surface", "get_worklist", "delegate"):
+            return self._coordinate_tool(name, args)
+        return self.gate.dispatch(name, args)   # leaf tools (defensive; coordinator shouldn't call)
+
+    def run(self, target):
+        system = build_system_prompt(self.scope)
+        messages = [{"role": "user", "content":
+                     f"Begin the autonomous pentest of {target}. Start with recon."}]
+        spent = 0
+        while True:
+            resp = self.client.messages.create(
+                model=MODEL_COORDINATOR, max_tokens=16000,
+                thinking={"type": "adaptive"}, output_config={"effort": "high"},
+                system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+                tools=COORDINATOR_TOOLS, messages=messages)
+            spent += resp.usage.output_tokens
+            if resp.stop_reason == "refusal":
+                print("coordinator refused; stopping.", file=sys.stderr); break
+            if resp.stop_reason == "end_turn":
+                print("coordinator finished the engagement."); break
+            messages.append({"role": "assistant", "content": resp.content})
+            results = [{"type": "tool_result", "tool_use_id": b.id,
+                        "content": (r := self.dispatch(b.name, b.input))[0], "is_error": r[1]}
+                       for b in resp.content if b.type == "tool_use"]
+            if results:
+                messages.append({"role": "user", "content": results})
+            if spent >= self.budget:
+                print(f"output-token budget reached ({spent}/{self.budget}); stopping."); break
+        return 0
+
 
 def run_coordinator(scope, output_dir, target, live, budget_out_tokens):
     try:
         import anthropic
     except ImportError:
-        print("error: `pip install anthropic` to run the live loop.", file=sys.stderr)
+        print("error: `pip install anthropic` (or .[runner]) to run the live loop.",
+              file=sys.stderr)
         return 1
     api_key = read_env_key()
     if not api_key:
         print("error: ANTHROPIC_API_KEY not available via env-reader (.env + allowlist).",
               file=sys.stderr)
         return 1
-
     client = anthropic.Anthropic(api_key=api_key)
-    gate = ToolGate(scope, output_dir, live=live)
-    system = build_system_prompt(scope)
-    messages = [{"role": "user", "content":
-                 f"Begin the autonomous pentest of {target}. Start with recon."}]
-    spent = 0
-
-    while True:
-        resp = client.messages.create(
-            model=MODEL_COORDINATOR,
-            max_tokens=16000,
-            thinking={"type": "adaptive"},
-            output_config={"effort": "high"},
-            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            tools=COORDINATOR_TOOLS,
-            messages=messages,
-        )
-        spent += resp.usage.output_tokens
-        if resp.stop_reason == "refusal":
-            print("coordinator refused; stopping.", file=sys.stderr)
-            break
-        if resp.stop_reason == "end_turn":
-            print("coordinator finished the engagement.")
-            break
-        messages.append({"role": "assistant", "content": resp.content})
-        results = []
-        for block in resp.content:
-            if block.type == "tool_use":
-                text, is_error = gate.dispatch(block.name, block.input)
-                results.append({"type": "tool_result", "tool_use_id": block.id,
-                                "content": text, "is_error": is_error})
-        if results:
-            messages.append({"role": "user", "content": results})
-        if spent >= budget_out_tokens:
-            print(f"output-token budget reached ({spent}/{budget_out_tokens}); stopping.")
-            break
-    return 0
+    return Engagement(scope, output_dir, client, live, budget_out_tokens).run(target)
 
 
 # ── selftest (no SDK / key / network / target required) ───────────────────────
@@ -463,6 +625,29 @@ def selftest():
                       judge_fn=lambda t, l: flip.pop(0)(t, l)).validate(
         Path(out) / "findings" / "finding-001")
     assert not ok
+
+    # --- milestone 2: worklist + claim dedup + executor fan-out ----------------
+    (Path(out) / "engagement.json").write_text(
+        json.dumps({"project": "t", "scope": ["acme.com"]}), encoding="utf-8")
+    state = EngagementState(out)
+    item = {"url": "https://api.acme.com/x?id=1", "param": "id", "vuln_class": "idor"}
+    state.add_surface([item])
+    assert "acme.com" in state.worklist()
+    # the safety property: two executors can't hold the same item at once
+    assert state.claim(item["url"], "exec-1", item["param"], item["vuln_class"])
+    assert not state.claim(item["url"], "exec-2", item["param"], item["vuln_class"])  # dedup
+    state.release(item["url"], "exec-1", item["param"], item["vuln_class"])
+    assert state.claim(item["url"], "exec-2", item["param"], item["vuln_class"])
+    state.release(item["url"], "exec-2", item["param"], item["vuln_class"])
+    # executor fan-out: one tests the item; another skips it while it's held
+    assert state.claim(item["url"], "holder", item["param"], item["vuln_class"])
+    rec_b = Executor(gate, state, sc, "exec-B", loop_fn=lambda it: "x").run(item)
+    assert rec_b["status"] == "skipped-claimed"
+    state.release(item["url"], "holder", item["param"], item["vuln_class"])
+    seen = []
+    rec_a = Executor(gate, state, sc, "exec-A",
+                     loop_fn=lambda it: seen.append(it) or "tested").run(item)
+    assert rec_a["status"] == "done" and seen == [item]
 
     print("engagement-runner selftest: PASS")
 

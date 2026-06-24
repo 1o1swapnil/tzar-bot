@@ -44,6 +44,19 @@ def _within(child: Path, parent: Path) -> bool:
     return child == parent or parent in child.parents
 
 
+def within_allowed_roots(path) -> bool:
+    """True if an arbitrary file path resolves under an allowed engagement root.
+
+    Use for a caller-supplied absolute output path (e.g. gen-nuclei --output)
+    where there is no separate output_dir base to contain against.
+    """
+    try:
+        p = Path(path).resolve()
+    except OSError:
+        return False
+    return any(_within(p, r) for r in allowed_roots())
+
+
 def safe_output_path(output_dir, *subparts):
     """Resolve <output_dir>/<subparts> safely.
 

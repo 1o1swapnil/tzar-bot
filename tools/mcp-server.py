@@ -13,6 +13,7 @@ Registered automatically via .claude/settings.json mcpServers block.
 
 import sys
 import os
+import re
 import json
 import subprocess
 from pathlib import Path
@@ -20,6 +21,13 @@ from pathlib import Path
 TOOLS_DIR = Path(__file__).parent.resolve()
 REPO_DIR  = TOOLS_DIR.parent
 PYTHON    = sys.executable
+
+sys.path.insert(0, str(TOOLS_DIR))
+from pathguard import within_allowed_roots  # noqa: E402  — contain caller-supplied output paths
+
+# Reject anything that is not a well-formed CVE id before it reaches a child
+# script as an argument (also neutralises option-injection via leading '-').
+_CVE_RE = re.compile(r"^CVE-\d{4}-\d{3,}$", re.IGNORECASE)
 
 
 # ── stdio framing ────────────────────────────────────────────────────────────
@@ -448,25 +456,31 @@ TOOL_DEFS = [
 # ── tool handlers ─────────────────────────────────────────────────────────────
 
 def tool_nvd_lookup(args):
-    cmd = [PYTHON, str(TOOLS_DIR / "nvd-lookup.py"), args["cve_id"]]
+    cve = args["cve_id"]
+    if not _CVE_RE.match(cve or ""):
+        return f"Invalid CVE id: {cve!r} (expected CVE-YYYY-NNNN…)", True
+    cmd = [PYTHON, str(TOOLS_DIR / "nvd-lookup.py")]
     if args.get("api_key"):
         cmd += ["--api-key", args["api_key"]]
+    cmd += ["--", cve]   # end-of-options: a leading-dash value can't become a flag
     out, err, rc = run(cmd)
     return (out + (f"\n{err}" if err and rc != 0 else "")).strip(), rc != 0
 
 
 def tool_validate_finding(args):
-    cmd = [PYTHON, str(TOOLS_DIR / "validate-finding.py"), args["finding_dir"]]
+    cmd = [PYTHON, str(TOOLS_DIR / "validate-finding.py")]
     if args.get("strict"):
         cmd.append("--strict")
+    cmd += ["--", args["finding_dir"]]
     out, err, rc = run(cmd)
     return (out + (f"\n{err}" if err else "")).strip(), rc == 2
 
 
 def tool_validate_all(args):
-    cmd = [PYTHON, str(TOOLS_DIR / "validate-finding.py"), args["output_dir"], "--all"]
+    cmd = [PYTHON, str(TOOLS_DIR / "validate-finding.py"), "--all"]
     if args.get("strict"):
         cmd.append("--strict")
+    cmd += ["--", args["output_dir"]]
     out, err, rc = run(cmd)
     return (out + (f"\n{err}" if err else "")).strip(), rc == 2
 
@@ -496,8 +510,14 @@ def tool_scrub_web_content(args):
 
 
 def tool_gen_nuclei_template(args):
+    cve = args["cve_id"]
+    if not _CVE_RE.match(cve or ""):
+        return f"Invalid CVE id: {cve!r} (expected CVE-YYYY-NNNN…)", True
+    out_path = args.get("output_path")
+    if out_path and not within_allowed_roots(out_path):
+        return f"BLOCKED (path): output_path {out_path!r} is outside the engagement sandbox", True
     cmd = [PYTHON, str(TOOLS_DIR / "gen-nuclei-template.py"),
-           "--cve", args["cve_id"],
+           "--cve", cve,
            "--description", args.get("description", ""),
            "--path", args.get("path", "/")]
     for flag, key in [("--severity","severity"), ("--method","method"),
@@ -535,12 +555,13 @@ def tool_scope_check(args):
 
 
 def tool_memory_search(args):
-    cmd = [PYTHON, str(TOOLS_DIR / "memory-search.py"), args["query"]]
+    cmd = [PYTHON, str(TOOLS_DIR / "memory-search.py")]
     if args.get("type"):     cmd += ["--type",     args["type"]]
     if args.get("severity"): cmd += ["--severity", args["severity"]]
     if args.get("limit"):    cmd += ["--limit",     str(args["limit"])]
     if args.get("rebuild"):  cmd.append("--index")
     cmd.append("--json")
+    cmd += ["--", args["query"]]
     out, err, rc = run(cmd)
     return (out + (f"\n{err}" if err and rc != 0 else "")).strip(), rc != 0
 
@@ -624,11 +645,12 @@ def tool_token_meter(args):
 
 
 def tool_report_export(args):
-    cmd = [PYTHON, str(TOOLS_DIR / "report-export.py"), args["output_dir"]]
+    cmd = [PYTHON, str(TOOLS_DIR / "report-export.py")]
     if args.get("format"):  cmd += ["--format",  args["format"]]
     if args.get("client"):  cmd += ["--client",  args["client"]]
     if args.get("target"):  cmd += ["--target",  args["target"]]
     if args.get("out_dir"): cmd += ["--out-dir", args["out_dir"]]
+    cmd += ["--", args["output_dir"]]
     out, err, rc = run(cmd)
     return (out + (f"\n{err}" if err and rc != 0 else "")).strip(), rc != 0
 

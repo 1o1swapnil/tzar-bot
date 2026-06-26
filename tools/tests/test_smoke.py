@@ -41,7 +41,7 @@ HELP_TOOLS = [
     "lint-skills.py", "memory-search.py", "notify.py", "scope.py",
     "scrub-web-content.py", "se-dashboard.py", "sync-bughunter.py",
     "token-meter.py", "rate-limiter.py", "report-export.py", "mitre-lookup.py",
-    "atomic-red.py", "long-run.py",
+    "atomic-red.py", "long-run.py", "preflight.py",
 ]
 
 TIMEOUT = 90
@@ -122,6 +122,18 @@ def test_mitre_lookup_offline():
 
 def test_long_run_selftest():
     assert tool("long-run.py", "--selftest").returncode == 0
+
+
+def test_preflight_selftest():
+    assert tool("preflight.py", "--selftest").returncode == 0
+
+
+def test_preflight_check_json():
+    r = tool("preflight.py", "check", "--type", "Network", "--json")
+    assert r.returncode == 0, r.stderr
+    d = json.loads(r.stdout)
+    assert d["engagement_type"] == "Network" and "root_capable" in d["root"]
+    assert any(t["tool"] == "nmap" for t in d["tools"])
 
 
 def test_atomic_red_offline():

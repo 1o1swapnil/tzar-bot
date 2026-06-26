@@ -94,7 +94,12 @@ scanner binaries when run from the coordinator context; `.claude/settings.json` 
 
 ---
 
-### Fix 5 — Tooling preflight & graceful degradation
+### Fix 5 — Tooling preflight & graceful degradation  ✅ DONE (2026-06-26)
+**Implemented:** `tools/preflight.py` (per-engagement-type tool/root probe → capability matrix +
+residual-coverage list with documented fallbacks; `check`/`--selftest`). Wired into
+`init-engagement.py`: every new engagement now writes `preflight.json` and prints the gaps/fallbacks
+up-front (to stderr, so `eval $(...)` scripting is unaffected). Smoke tests added (106 passing).
+
 **Gap:** The engagement assumed Kali tooling (nmap) and root; neither was present. There was **no
 preflight** — failures surfaced only when a tool was invoked, and the UDP requirement was dropped
 late. Fallbacks (Python connect-scan) were improvised mid-engagement.
@@ -133,5 +138,5 @@ against `scope.py`), tests in `tools/tests/`.
 | 2 | High | Resource kill at high concurrency (no cap) | Med |
 | 3 | High | Rogue executor re-runs; stand-down not enforced | Med–High |
 | 4 | Medium | Inline coordinator boundary is convention-only | Med |
-| 5 | Medium | No tooling/root preflight or graceful degradation | Low–Med |
+| 5 | Medium | No tooling/root preflight or graceful degradation | ✅ DONE |
 | 6 | Medium | Scope-check blind to `-iL` file targets | Low–Med |

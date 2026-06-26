@@ -36,6 +36,23 @@ sys.path.insert(0, str(TOOLS_DIR))
 
 from scope import Scope, host_of          # noqa: E402  — code-enforced scope authority
 from pathguard import safe_output_path     # noqa: E402  — write containment
+from concurrency import safe_workers, safe_fanout  # noqa: E402  — bounded parallelism
+
+# Shared agent registry helper (used by both the inline coordinator and this runner).
+_SUPERVISOR = TOOLS_DIR / "agent-supervisor.py"
+
+def _supervisor_register(output_dir, name, url):
+    """Record a delegated executor in the shared <output-dir>/.agents registry so the
+    autonomous runner and the inline coordinator use one lifecycle ledger. Best-effort."""
+    if not (output_dir and _SUPERVISOR.exists()):
+        return
+    try:
+        subprocess.run([sys.executable, str(_SUPERVISOR), "register",
+                        "--output-dir", str(output_dir), "--name", name,
+                        "--pid", str(os.getpid()), "--owns", url or "-"],
+                       capture_output=True, timeout=10)
+    except Exception:
+        pass
 
 MODEL_COORDINATOR = "claude-opus-4-8"
 
@@ -133,15 +150,18 @@ class ToolGate:
         if not self.live:
             return self._allow("run_scanner", f"DRY-RUN would execute: {' '.join(cmd)}",
                                f"[dry-run] in-scope; would run: {' '.join(cmd)}")
+        # Bound scanner concurrency the same way the inline path does: tzar-aware
+        # scanners read $TZAR_WORKERS to size their pools and avoid resource kills.
+        env = {**os.environ, "TZAR_WORKERS": str(safe_workers())}
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
             out = (r.stdout + ("\n" + r.stderr if r.returncode != 0 else "")).strip()
         except FileNotFoundError:
             return self._deny("run_scanner", f"{tool} not installed")
         except subprocess.TimeoutExpired:
             out = f"[{tool} timed out after 300s]"
-        return self._allow("run_scanner", f"ran {tool} against {host_of(target)}",
-                           _scrub(out)[:12000])
+        return self._allow("run_scanner", f"ran {tool} against {host_of(target)} "
+                           f"(workers<={env['TZAR_WORKERS']})", _scrub(out)[:12000])
 
     def http_request(self, args):
         url = args.get("url", "")
@@ -505,13 +525,23 @@ class Engagement:
         if name == "add_surface":
             return self.state.add_surface(args.get("items", [])), False
         if name == "get_worklist":
-            return self.state.worklist(top=args.get("top")), False
+            wl = self.state.worklist(top=args.get("top"))
+            fan = safe_fanout(args.get("top") or 8)
+            return (f"{wl}\n[runner] safe parallel fan-out: delegate at most {fan} "
+                    f"item(s) concurrently (cpu-bounded)."), False
         if name == "delegate":
-            self._exec_n += 1
-            ex = Executor(self.gate, self.state, self.scope,
-                          agent_id=f"exec-{self._exec_n}", client=self.client, live=self.live)
-            return json.dumps(ex.run(args)), False
+            return json.dumps(self._spawn_executor(args)), False
         return f"BLOCKED by gate: unknown coordinator tool {name!r}", True
+
+    def _spawn_executor(self, item, loop_fn=None):
+        """Create a claiming executor, register it in the shared agent registry, run it.
+        loop_fn is injectable so the full orchestration is testable without the SDK."""
+        self._exec_n += 1
+        agent_id = f"exec-{self._exec_n}"
+        _supervisor_register(self.output_dir, agent_id, item.get("url", ""))
+        ex = Executor(self.gate, self.state, self.scope, agent_id=agent_id,
+                      client=self.client, live=self.live, loop_fn=loop_fn)
+        return ex.run(item)
 
     def dispatch(self, name, args):
         if name in ("add_surface", "get_worklist", "delegate"):
@@ -648,6 +678,32 @@ def selftest():
     rec_a = Executor(gate, state, sc, "exec-A",
                      loop_fn=lambda it: seen.append(it) or "tested").run(item)
     assert rec_a["status"] == "done" and seen == [item]
+
+    # --- end-to-end orchestration (SDK-free): surface -> delegate -> finding ->
+    #     shared registry -> validate. Exercises the converged primitives. ----------
+    eng = Engagement(sc, out, client=None, live=False, budget_out_tokens=1000)
+    # get_worklist now carries the concurrency fan-out hint (converged with concurrency.py)
+    wl_txt, _ = eng._coordinate_tool("get_worklist", {"top": 50})
+    assert "fan-out" in wl_txt
+    e2e_item = {"url": "https://acme.com/e2e?id=9", "param": "id", "vuln_class": "idor"}
+    eng.state.add_surface([e2e_item])
+    # a delegated executor writes a finding via the gate; _spawn_executor registers it
+    # in the shared <out>/.agents ledger (converged with agent-supervisor.py)
+    rec = eng._spawn_executor(
+        e2e_item,
+        loop_fn=lambda it: (eng.gate.dispatch(
+            "write_finding", {"name": "finding-e2e", "content": "# Finding: e2e\n\npoc"}),
+            "wrote")[1])
+    assert rec["status"] == "done"
+    assert (Path(out) / "findings" / "finding-e2e" / "description.md").is_file()
+    reg = json.loads((Path(out) / ".agents" / "registry.json").read_text())
+    assert any(a.get("owns") == e2e_item["url"] for a in reg["agents"].values()), \
+        "delegated executor not in shared registry"
+    # validate the e2e finding through the adversarial panel -> validated/
+    okay, vrec = Validator(out, votes=3, judge_fn=real, mechanical_fn=mech_pass).validate(
+        Path(out) / "findings" / "finding-e2e")
+    assert okay and vrec["confirmed"]
+    assert (Path(out) / "artifacts" / "validated" / "finding-e2e.json").is_file()
 
     print("engagement-runner selftest: PASS")
 

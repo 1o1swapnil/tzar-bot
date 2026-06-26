@@ -393,6 +393,56 @@ def _always_ok(host: str) -> bool:
     return False
 
 
+# Flags whose argument is a FILE of targets (one per line) — nmap/masscan -iL,
+# nuclei/httpx/dnsx/naabu -l/-list, subfinder -dL, generic --target-file/--targets.
+TARGET_FILE_FLAGS = ("-iL", "-l", "-list", "--list", "-dL", "--target-file", "--targets")
+_TARGETISH = re.compile(r"^(?:https?://)?(?:\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?|[A-Za-z0-9_-]+\.[A-Za-z0-9._-]+)")
+
+
+def _looks_like_target(tok: str) -> bool:
+    """Keep only host-like file lines (IP/CIDR/domain/URL) so a non-target file
+    read via a target-file flag does not produce false-positive 'hosts'."""
+    return bool(_TARGETISH.match(tok.strip()))
+
+
+def _target_file_hosts(command: str) -> list[str]:
+    """Resolve -iL/-l/--target-file style flags, read the file, and return its
+    host-like lines so out-of-scope targets hidden in a file are still checked.
+    Best-effort: unreadable/missing files are skipped (documented limitation —
+    network egress control remains the real boundary)."""
+    out: list[str] = []
+    try:
+        toks = shlex.split(command)
+    except ValueError:
+        return out
+    for i, tok in enumerate(toks):
+        path = None
+        for fl in TARGET_FILE_FLAGS:
+            if tok == fl and i + 1 < len(toks):
+                path = toks[i + 1]
+            elif tok.startswith(fl + "="):
+                path = tok[len(fl) + 1:]
+        if not path:
+            continue
+        p = Path(path)
+        if not p.is_absolute():
+            p = Path(os.getcwd()) / path
+        try:
+            if not p.is_file() or p.stat().st_size > 5_000_000:
+                continue
+            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()[:10000]
+        except OSError:
+            continue
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            first = line.split()[0]
+            if _looks_like_target(first):
+                out.append(first)
+    return out
+
+
 def check_command(command: str, scope: "Scope") -> tuple[bool, str]:
     """
     Returns (allowed, reason). The command is parsed shell-aware (see
@@ -406,8 +456,10 @@ def check_command(command: str, scope: "Scope") -> tuple[bool, str]:
     if not scope.active:
         return True, "no active scope"
 
-    # Collect candidate targets shell-aware, normalise each to a host, dedupe
-    candidates = _collect_candidates(command, {})
+    # Collect candidate targets shell-aware, normalise each to a host, dedupe.
+    # Also resolve target-file flags (-iL/-l/--target-file) so OOS hosts hidden
+    # in a file are validated, not silently passed through.
+    candidates = _collect_candidates(command, {}) + _target_file_hosts(command)
 
     violations = []
     seen = set()

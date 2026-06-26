@@ -116,7 +116,13 @@ coverage.
 
 ---
 
-### Fix 6 — Scope-check blind to file-list (`-iL`) and stdin targets (documented limitation)
+### Fix 6 — Scope-check blind to file-list (`-iL`) and stdin targets  ✅ DONE (2026-06-26)
+**Implemented:** `scope-check.py` now resolves target-file flags (`-iL`, `-l`, `-list`, `--list`,
+`-dL`, `--target-file`, `--targets`), reads the file (size/line capped), keeps only host-like lines
+(IP/CIDR/domain/URL, so non-target files don't false-positive), and validates each against the active
+scope — OOS hosts hidden in a *readable* file are blocked. stdin/unreadable-file targets remain a
+documented limitation (egress control is the real boundary). Smoke test + CLAUDE.md updated (107 passing).
+
 **Gap:** `scope-check.py` parses targets from the command line but **cannot see targets inside a
 file** (`nmap -iL targets.txt`) or piped via stdin. Acknowledged in CLAUDE.md as defense-in-depth,
 not a boundary — but worth closing for the common `-iL` case.
@@ -139,4 +145,4 @@ against `scope.py`), tests in `tools/tests/`.
 | 3 | High | Rogue executor re-runs; stand-down not enforced | Med–High |
 | 4 | Medium | Inline coordinator boundary is convention-only | Med |
 | 5 | Medium | No tooling/root preflight or graceful degradation | ✅ DONE |
-| 6 | Medium | Scope-check blind to `-iL` file targets | Low–Med |
+| 6 | Medium | Scope-check blind to `-iL` file targets | ✅ DONE |

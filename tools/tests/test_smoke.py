@@ -152,6 +152,26 @@ def test_scope_selftest():
     assert tool("scope.py", "--selftest").returncode == 0
 
 
+def test_scope_check_resolves_target_file(tmp_path):
+    """-iL/--target-file targets hidden in a file must be scope-checked (backlog #6)."""
+    eng = tmp_path / "eng"; eng.mkdir()
+    (eng / "engagement.json").write_text(
+        json.dumps({"in_scope": ["10.0.0.0/24"], "out_of_scope": []}))
+    env = {**os.environ, "OUTPUT_DIR": str(eng)}
+
+    oos = tmp_path / "oos.txt"; oos.write_text("10.0.0.5\n8.8.8.8  # sneaky OOS\n")
+    hook = json.dumps({"tool_name": "Bash",
+                       "tool_input": {"command": f"nmap -sT -iL {oos}"}})
+    r = run([PY, str(TOOLS / "scope-check.py")], stdin=hook, env=env)
+    assert r.returncode == 2, f"OOS host in -iL file should block; got {r.returncode}\n{r.stderr}"
+
+    ok = tmp_path / "ok.txt"; ok.write_text("10.0.0.5\n10.0.0.6\n")
+    hook2 = json.dumps({"tool_name": "Bash",
+                        "tool_input": {"command": f"nmap -sT -iL {ok}"}})
+    r2 = run([PY, str(TOOLS / "scope-check.py")], stdin=hook2, env=env)
+    assert r2.returncode == 0, f"in-scope-only -iL file should pass; got {r2.returncode}\n{r2.stderr}"
+
+
 def test_pathguard_selftest():
     assert tool("pathguard.py").returncode == 0
 

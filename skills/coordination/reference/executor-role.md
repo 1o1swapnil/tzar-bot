@@ -21,6 +21,7 @@ You are an executor agent. You have **no memory of prior batches** — your full
      python3 tools/long-run.py status --log "$OUTPUT_DIR/recon/nmap-full.log" --tail 20
      ```
    - **Always write incremental output** — tools/scripts must persist results per-host / per-step (not only on completion), so a kill loses at most the in-flight unit. `long-run.py` streams stdout to the log as it happens.
+9. **Scanner commands — carry the executor marker** — the `coordinator-guard.py` PreToolUse hook blocks scanning/exploitation binaries (nmap, sqlmap, ffuf, nuclei, …) from the *coordinator* during an active engagement. As an executor you ARE allowed to run them — prefix each such command with `TZAR_ROLE=executor` (e.g. `TZAR_ROLE=executor nmap -p- TARGET`), or run with `TZAR_ROLE=executor` exported. This is harmless if the hook doesn't apply to you and required if it does.
 
 ## Prompt Injection Defense — MANDATORY
 

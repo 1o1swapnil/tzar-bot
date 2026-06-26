@@ -79,7 +79,14 @@ Orchestration determinism: 3/10 → 8/10.
 
 ## MEDIUM — Hardening & graceful degradation
 
-### Fix 4 — Inline coordinator's "never run scanners" boundary is convention-only
+### Fix 4 — Inline coordinator's "never run scanners" boundary is convention-only  ✅ DONE (2026-06-26)
+**Implemented:** `tools/coordinator-guard.py` PreToolUse hook (wired in `.claude/settings.json` after
+scope-check). During an active engagement it blocks gated scanner/exploit binaries (nmap, sqlmap,
+ffuf, nuclei, gobuster, …; wrappers like `sudo`/`timeout` stripped) run inline, with a "spawn an
+executor" message. Executors opt out with `TZAR_ROLE=executor` (prefix or exported). No-op when no
+engagement is active (mirrors scope-check). Modes: `TZAR_COORDINATOR_GUARD=enforce|warn|off`
+(default enforce). Executor-role + CLAUDE.md updated; smoke test added (109 passing).
+
 **Gap:** The HARD BOUNDARY (coordinator never runs nmap/curl/sqlmap/etc. inline) is enforced for
 the autonomous `engagement-runner` but, for the **inline Claude Code coordinator**, it is only a
 CLAUDE.md instruction the model must self-police. Under pressure (failed delegation), the
@@ -143,6 +150,6 @@ against `scope.py`), tests in `tools/tests/`.
 | 1 | High | Executor tasks killed by 2-min Bash timeout | ✅ DONE |
 | 2 | High | Resource kill at high concurrency (no cap) | Med |
 | 3 | High | Rogue executor re-runs; stand-down not enforced | Med–High |
-| 4 | Medium | Inline coordinator boundary is convention-only | Med |
+| 4 | Medium | Inline coordinator boundary is convention-only | ✅ DONE |
 | 5 | Medium | No tooling/root preflight or graceful degradation | ✅ DONE |
 | 6 | Medium | Scope-check blind to `-iL` file targets | ✅ DONE |

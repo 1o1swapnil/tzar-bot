@@ -152,6 +152,25 @@ def test_scope_selftest():
     assert tool("scope.py", "--selftest").returncode == 0
 
 
+def test_coordinator_guard(tmp_path):
+    """Coordinator boundary: scanners blocked inline during an engagement; executor marker allows."""
+    eng = tmp_path / "eng"; eng.mkdir()
+    (eng / "engagement.json").write_text(json.dumps({"in_scope": ["10.0.0.0/24"]}))
+    env = {**os.environ, "OUTPUT_DIR": str(eng)}
+
+    def guard(cmd, extra_env=None):
+        e = {**env, **(extra_env or {})}
+        hook = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
+        return run([PY, str(TOOLS / "coordinator-guard.py")], stdin=hook, env=e).returncode
+
+    assert guard("nmap -p- 10.0.0.5") == 2, "coordinator nmap should be blocked"
+    assert guard("TZAR_ROLE=executor nmap -p- 10.0.0.5") == 0, "executor marker should allow"
+    assert guard("sudo masscan 10.0.0.5 -p80") == 2, "wrapped scanner should be blocked"
+    assert guard("python3 tools/session-memory.py list") == 0, "non-scanner should pass"
+    assert guard("nmap -p- 10.0.0.5", {"TZAR_COORDINATOR_GUARD": "off"}) == 0, "off mode allows"
+    assert guard("nmap -p- 10.0.0.5", {"TZAR_ROLE": "executor"}) == 0, "exported role allows"
+
+
 def test_scope_check_resolves_target_file(tmp_path):
     """-iL/--target-file targets hidden in a file must be scope-checked (backlog #6)."""
     eng = tmp_path / "eng"; eng.mkdir()

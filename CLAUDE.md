@@ -100,7 +100,7 @@ Scope is enforced in **code**, not by trusting the model: `tools/scope.py` (deny
 ## Agent Architecture
 
 **Coordinator (inline)** — follows `skills/coordination/SKILL.md`. Holds all context; writes structured reasoning to `OUTPUT_DIR/attack-chain.md` **before every executor batch**; reads source code first; delegates 1–2 focused executors per batch (depth over breadth); tracks with TaskCreate/TaskUpdate.
-> **HARD BOUNDARY** — the coordinator NEVER runs `nmap`, `curl` (against target), `ffuf`, `gobuster`, `sqlmap`, `nikto`, `nuclei`, `masscan`, `katana`, `subfinder`, `amass`, or any scanning/exploitation tool inline. About to run one? Stop and spawn an executor.
+> **HARD BOUNDARY (code-enforced)** — the coordinator NEVER runs `nmap`, `curl` (against target), `ffuf`, `gobuster`, `sqlmap`, `nikto`, `nuclei`, `masscan`, `katana`, `subfinder`, `amass`, or any scanning/exploitation tool inline. About to run one? Stop and spawn an executor. This is enforced by the `coordinator-guard.py` PreToolUse hook (active only during an engagement): it blocks gated scanner binaries unless the command carries the executor marker `TZAR_ROLE=executor`. Toggle with `TZAR_COORDINATOR_GUARD=enforce|warn|off`.
 
 **Executors (background)** — `Agent(prompt=..., run_in_background=True)`, per `skills/coordination/reference/executor-role.md`. Full mission context; source-code-first then escalate; write findings to `OUTPUT_DIR/findings/finding-NNN/`, captures to `screenshots/` + `evidence/`.
 

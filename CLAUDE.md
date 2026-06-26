@@ -76,10 +76,10 @@ Skills live in `skills/` — each a `SKILL.md` plus a `reference/` folder. **Two
 | **Enterprise identity & perimeter** | `m365-entra-attack`, `okta-attack`, `vmware-vcenter-attack`, `enterprise-vpn-attack`, `hunt-sharepoint`, `supply-chain-attack-recon` |
 | **AI/ML model governance** | `bias-fairness-testing`, `model-robustness`, `model-monitoring`, `incident-response` |
 | **Wireless / Mobile** | `wireless`, `mapt` |
-| **Red Team** | `red-team`, `redteam-report-template`, `mid-engagement-ir-detection` |
+| **Red Team** | `red-team`, `redteam-report-template`, `mid-engagement-ir-detection`, `atomic-red-team` |
 | **Specialized** | `blockchain-security`, `ai-threat-testing`, `social-engineering`, `dfir`, `meme-coin-audit` |
 | **Bug bounty & reporting** | `bb-methodology`, `bb-local-toolkit`, `bugcrowd-reporting`, `evidence-hygiene` |
-| **Tooling** | `essential-tools`, `source-code-scanning`, `cve-poc-generator`, `cve-risk-score`, `script-generator`, `patt-fetcher` |
+| **Tooling** | `essential-tools`, `source-code-scanning`, `cve-poc-generator`, `cve-risk-score`, `script-generator`, `patt-fetcher`, `mitre-attack` |
 | **Platform / Workflow** | `hackthebox`, `hackerone`, `github-workflow`, `skill-update` |
 | **Orchestrators** | `web-chain` (self-driving 6-phase web pentest) |
 

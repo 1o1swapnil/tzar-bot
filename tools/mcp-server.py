@@ -90,6 +90,50 @@ TOOL_DEFS = [
         },
     },
     {
+        "name": "mitre_lookup",
+        "description": (
+            "Look up / search / map MITRE ATT&CK techniques across the Enterprise, "
+            "Mobile and ICS (OT) matrices from a local offline index. Use 'map' to get "
+            "candidate technique IDs for a finding description, 'lookup' for a technique "
+            "by ID (Txxxx[.yyy]), 'search' for keywords, 'tactic' to list a tactic's "
+            "techniques, 'stats' for index coverage."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["lookup", "search", "map", "tactic", "tactics", "stats"],
+                           "description": "Operation to run"},
+                "query":  {"type": "string", "description": "Technique ID (lookup), keywords (search), finding text (map), or tactic name (tactic)"},
+                "matrix": {"type": "string", "enum": ["all", "enterprise", "mobile", "ics"], "default": "all"},
+                "limit":  {"type": "integer", "description": "Max results for search/map", "default": 8},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "atomic_red",
+        "description": (
+            "Look up Red Canary Atomic Red Team detection-validation tests, keyed by MITRE "
+            "ATT&CK technique, from a local offline index. action 'lookup' lists tests for a "
+            "technique ID, 'search' finds tests by keyword, 'show' returns one test's full "
+            "command+cleanup, 'for-finding' maps a finding description to techniques then to "
+            "atomic tests, 'stats' shows coverage. READ-ONLY: returns test definitions/commands; "
+            "it never executes them (run atomics only in an authorized lab via Invoke-AtomicRedTeam)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action":   {"type": "string", "enum": ["lookup", "search", "show", "for-finding", "stats"]},
+                "query":    {"type": "string", "description": "Technique ID (lookup/show), keywords (search), or finding text (for-finding)"},
+                "platform": {"type": "string", "enum": ["windows", "linux", "macos"], "description": "Optional platform filter"},
+                "test":     {"type": "integer", "description": "show: 1-based test number"},
+                "guid":     {"type": "string", "description": "show: select test by GUID"},
+                "limit":    {"type": "integer", "default": 20},
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "validate_finding",
         "description": (
             "Run the 5-check validation protocol on a single finding directory: "
@@ -467,6 +511,53 @@ def tool_nvd_lookup(args):
     return (out + (f"\n{err}" if err and rc != 0 else "")).strip(), rc != 0
 
 
+def tool_mitre_lookup(args):
+    action = args.get("action")
+    if action not in {"lookup", "search", "map", "tactic", "tactics", "stats"}:
+        return f"Invalid action: {action!r}", True
+    cmd = [PYTHON, str(TOOLS_DIR / "mitre-lookup.py"), action]
+    needs_query = action in {"lookup", "search", "map", "tactic"}
+    if needs_query:
+        q = (args.get("query") or "").strip()
+        if not q:
+            return f"action '{action}' requires 'query'", True
+    if action in {"search", "map"} and args.get("limit"):
+        cmd += ["--limit", str(int(args["limit"]))]
+    if args.get("matrix"):
+        cmd += ["--matrix", args["matrix"]]
+    if action != "update":
+        cmd.append("--json")
+    if needs_query:
+        cmd += ["--", q]
+    out, err, rc = run(cmd)
+    return (out + (f"\n{err}" if err and rc != 0 else "")).strip(), rc != 0
+
+
+def tool_atomic_red(args):
+    action = args.get("action")
+    if action not in {"lookup", "search", "show", "for-finding", "stats"}:
+        return f"Invalid action: {action!r}", True
+    cmd = [PYTHON, str(TOOLS_DIR / "atomic-red.py"), action]
+    needs_query = action in {"lookup", "search", "show", "for-finding"}
+    q = (args.get("query") or "").strip()
+    if needs_query and not q:
+        return f"action '{action}' requires 'query'", True
+    if args.get("platform") and action != "stats":
+        cmd += ["--platform", args["platform"]]
+    if action in {"search", "for-finding"} and args.get("limit"):
+        cmd += ["--limit", str(int(args["limit"]))]
+    if action == "show":
+        if args.get("guid"):
+            cmd += ["--guid", str(args["guid"])]
+        elif args.get("test"):
+            cmd += ["--test", str(int(args["test"]))]
+    cmd.append("--json")
+    if needs_query:
+        cmd += ["--", q]
+    out, err, rc = run(cmd)
+    return (out + (f"\n{err}" if err and rc != 0 else "")).strip(), rc != 0
+
+
 def tool_validate_finding(args):
     cmd = [PYTHON, str(TOOLS_DIR / "validate-finding.py")]
     if args.get("strict"):
@@ -704,6 +795,8 @@ def tool_engagement_state(args):
 
 HANDLERS = {
     "nvd_lookup":            tool_nvd_lookup,
+    "mitre_lookup":          tool_mitre_lookup,
+    "atomic_red":            tool_atomic_red,
     "validate_finding":      tool_validate_finding,
     "validate_all_findings": tool_validate_all,
     "init_engagement":       tool_init_engagement,

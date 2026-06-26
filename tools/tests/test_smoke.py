@@ -40,7 +40,8 @@ HELP_TOOLS = [
     "engagement-state.py", "gen-nuclei-template.py", "init-engagement.py",
     "lint-skills.py", "memory-search.py", "notify.py", "scope.py",
     "scrub-web-content.py", "se-dashboard.py", "sync-bughunter.py",
-    "token-meter.py", "rate-limiter.py", "report-export.py",
+    "token-meter.py", "rate-limiter.py", "report-export.py", "mitre-lookup.py",
+    "atomic-red.py",
 ]
 
 TIMEOUT = 90
@@ -103,6 +104,33 @@ def test_help_exits_zero(name):
 
 
 # ── 3. Built-in self-tests ────────────────────────────────────────────────────
+
+def test_mitre_lookup_offline():
+    # stats reads the committed local index (no network)
+    r = tool("mitre-lookup.py", "stats")
+    assert r.returncode == 0, r.stderr
+    assert "enterprise" in r.stdout and "mobile" in r.stdout and "ics" in r.stdout
+    # lookup a stable enterprise technique as JSON
+    r2 = tool("mitre-lookup.py", "lookup", "T1133", "--matrix", "enterprise", "--json")
+    assert r2.returncode == 0, r2.stderr
+    data = json.loads(r2.stdout)
+    assert data and data[0]["id"] == "T1133"
+    # map returns candidate techniques for a finding description
+    r3 = tool("mitre-lookup.py", "map", "cleartext http credential sniffing", "--json")
+    assert r3.returncode == 0 and json.loads(r3.stdout)
+
+
+def test_atomic_red_offline():
+    # stats reads the committed local index (no network)
+    r = tool("atomic-red.py", "stats")
+    assert r.returncode == 0, r.stderr
+    assert "atomic tests" in r.stdout
+    # lookup a stable technique as JSON
+    r2 = tool("atomic-red.py", "lookup", "T1040", "--json")
+    assert r2.returncode == 0, r2.stderr
+    data = json.loads(r2.stdout)
+    assert data["id"] == "T1040" and isinstance(data["tests"], list)
+
 
 def test_scope_selftest():
     assert tool("scope.py", "--selftest").returncode == 0

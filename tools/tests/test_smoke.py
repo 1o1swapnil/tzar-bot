@@ -42,6 +42,7 @@ HELP_TOOLS = [
     "scrub-web-content.py", "se-dashboard.py", "sync-bughunter.py",
     "token-meter.py", "rate-limiter.py", "report-export.py", "mitre-lookup.py",
     "atomic-red.py", "long-run.py", "preflight.py", "agent-supervisor.py",
+    "concurrency.py",
 ]
 
 TIMEOUT = 90
@@ -122,6 +123,43 @@ def test_mitre_lookup_offline():
 
 def test_long_run_selftest():
     assert tool("long-run.py", "--selftest").returncode == 0
+
+
+def test_concurrency_selftest():
+    assert tool("concurrency.py", "--selftest").returncode == 0
+
+
+def test_concurrency_caps(tmp_path):
+    r = tool("concurrency.py", "recommend", "--workers", "1200", "--items", "30", "--json")
+    assert r.returncode == 0, r.stderr
+    d = json.loads(r.stdout)
+    assert d["workers_per_process"] <= d["hard_cap"], "workers not capped"
+    assert d["workers_per_process"] < 1200, "over-request should be reduced"
+    assert d["parallel_fanout"] >= 1
+
+
+def test_long_run_retry_lowers_concurrency(tmp_path):
+    """long-run retries a resource-killed unit at halved TZAR_WORKERS until it succeeds."""
+    import time
+    flaky = tmp_path / "flaky.py"
+    flaky.write_text(
+        "import os, sys\n"
+        "w = int(os.environ.get('TZAR_WORKERS', '0'))\n"
+        "sys.exit(137 if w > 100 else 0)\n")
+    log = tmp_path / "r.log"
+    r = run([PY, str(TOOLS / "long-run.py"), "start", "--log", str(log),
+             "--workers", "400", "--retry-on-kill", "3", "--", PY, str(flaky)])
+    assert r.returncode == 0, r.stderr
+    status = Path(str(log) + ".status")
+    for _ in range(100):
+        if status.exists():
+            st = json.loads(status.read_text())
+            if st.get("state") in ("done", "failed"):
+                break
+        time.sleep(0.05)
+    st = json.loads(status.read_text())
+    assert st["state"] == "done" and st["exit_code"] == 0, st
+    assert st.get("attempts", 1) >= 2, "should have retried at lower concurrency"
 
 
 def test_preflight_selftest():

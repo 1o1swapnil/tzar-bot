@@ -121,6 +121,22 @@ python3 tools/agent-supervisor.py reap --output-dir "$OUTPUT_DIR"
 Combine with idempotent, per-agent output dirs (skip-if-exists) so a rogue re-run cannot overwrite
 another agent's results.
 
+### Concurrency — don't trip a resource kill
+
+5 batches × 1200 worker threads (~6000 sockets) once triggered an external `exit 144` kill. Size
+parallelism from the shared helper, not by guessing:
+
+```bash
+python3 tools/concurrency.py recommend --workers 1200 --items 30   # caps workers + fan-out
+```
+
+- **Per-process workers** default to ≤400 (hard cap 512). Scan scripts should read `$TZAR_WORKERS`
+  (e.g. `workers = int(os.environ.get("TZAR_WORKERS", "400"))`, or import `concurrency.safe_workers()`).
+- **Parallel executor fan-out** ≤ `cpu-2`. Prefer fewer, larger batches over many tiny ones.
+- **Auto-recover** from a resource kill: launch scans via `long-run.py start --workers 400
+  --retry-on-kill 3 -- <scan>` — on a signal/resource kill it retries, halving `$TZAR_WORKERS`
+  each time (400 → 200 → 100), so a too-hot scan self-corrects instead of dying.
+
 ## Spawning Validators
 
 After all phase executors complete, for each finding in OUTPUT_DIR/findings/:

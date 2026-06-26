@@ -62,29 +62,56 @@ def _proc_exists(pid):
     return Path(f"/proc/{pid}").exists()
 
 
+# Exit codes that indicate a signal / resource kill (worth retrying at lower concurrency).
+# Popen.wait() returns a negative value when killed by a signal on POSIX; shells/wrappers
+# surface the same as 128+signum (137 SIGKILL/OOM, 143 SIGTERM, 144, 134 SIGABRT, 139 SIGSEGV).
+_KILL_CODES = {137, 143, 144, 134, 139}
+
+def _is_kill(rc):
+    return rc is not None and (rc < 0 or rc in _KILL_CODES)
+
+
 # ── supervisor (internal) ──────────────────────────────────────────────────
-def _supervise(log, cmd, cwd):
-    """Run cmd, stream combined output to log, record final status. Runs detached."""
+def _supervise(log, cmd, cwd, workers=None, retry_on_kill=0):
+    """Run cmd, stream output to log, record final status. Runs detached.
+    On a signal/resource kill, retry up to `retry_on_kill` times, each time halving
+    the TZAR_WORKERS passed to the child (so a resource-killed scan re-runs lower)."""
     Path(log).parent.mkdir(parents=True, exist_ok=True)
     started = _now()
-    _write_status(log, state="running", supervisor_pid=os.getpid(),
-                  cmd=cmd, cwd=cwd, started=started)
+    w = workers
+    attempt = 0
     rc = None
     try:
         with open(log, "ab", buffering=0) as lf:
-            lf.write(f"[long-run] {started} starting: {' '.join(cmd)}\n".encode())
-            proc = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT,
-                                    cwd=cwd or None)
-            _write_status(log, state="running", supervisor_pid=os.getpid(),
-                          child_pid=proc.pid, cmd=cmd, cwd=cwd, started=started)
-            rc = proc.wait()
-            lf.write(f"[long-run] {_now()} finished rc={rc}\n".encode())
+            while True:
+                attempt += 1
+                env = os.environ.copy()
+                if w is not None:
+                    env["TZAR_WORKERS"] = str(w)
+                _write_status(log, state="running", supervisor_pid=os.getpid(),
+                              attempt=attempt, workers=w, cmd=cmd, cwd=cwd, started=started)
+                lf.write(f"[long-run] {_now()} attempt {attempt} "
+                         f"(workers={w}) starting: {' '.join(cmd)}\n".encode())
+                proc = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT,
+                                        cwd=cwd or None, env=env)
+                _write_status(log, state="running", supervisor_pid=os.getpid(),
+                              child_pid=proc.pid, attempt=attempt, workers=w,
+                              cmd=cmd, cwd=cwd, started=started)
+                rc = proc.wait()
+                lf.write(f"[long-run] {_now()} attempt {attempt} finished rc={rc}\n".encode())
+                if _is_kill(rc) and attempt <= retry_on_kill:
+                    w = max(50, (w if w else 400) // 2)
+                    lf.write(f"[long-run] signal/resource kill — retrying at "
+                             f"lower concurrency (workers={w})\n".encode())
+                    continue
+                break
     except (OSError, ValueError) as e:
         _write_status(log, state="failed", error=str(e), cmd=cmd, cwd=cwd,
-                      started=started, finished=_now())
+                      started=started, finished=_now(), attempts=attempt)
         return 1
     _write_status(log, state=("done" if rc == 0 else "failed"),
-                  exit_code=rc, cmd=cmd, cwd=cwd, started=started, finished=_now())
+                  exit_code=rc, cmd=cmd, cwd=cwd, started=started, finished=_now(),
+                  attempts=attempt, workers=w)
     return 0
 
 
@@ -95,9 +122,14 @@ def cmd_start(args):
     log = os.path.abspath(args.log)
     Path(log).parent.mkdir(parents=True, exist_ok=True)
     # Detach a supervisor process that owns the child and updates status.
+    extra = []
+    if getattr(args, "workers", None):
+        extra += ["--workers", str(args.workers)]
+    if getattr(args, "retry_on_kill", 0):
+        extra += ["--retry-on-kill", str(args.retry_on_kill)]
     sup = subprocess.Popen(
         [sys.executable, os.path.abspath(__file__), "_run", "--log", log,
-         *(["--cwd", args.cwd] if args.cwd else []), "--", *args.command],
+         *(["--cwd", args.cwd] if args.cwd else []), *extra, "--", *args.command],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
@@ -177,6 +209,10 @@ def main():
         p = sub.add_parser(name, help=argparse.SUPPRESS if name == "_run" else "start a detached long-running command")
         p.add_argument("--log", required=True)
         p.add_argument("--cwd", default="")
+        p.add_argument("--workers", type=int, default=None,
+                       help="set $TZAR_WORKERS for the child (concurrency knob)")
+        p.add_argument("--retry-on-kill", type=int, default=0,
+                       help="retries on signal/resource kill, halving workers each time")
         p.add_argument("command", nargs=argparse.REMAINDER,
                        help="-- then the command and its args")
 
@@ -193,7 +229,8 @@ def main():
         args.command = args.command[1:]
 
     if args.cmd == "_run":
-        sys.exit(_supervise(args.log, args.command, args.cwd))
+        sys.exit(_supervise(args.log, args.command, args.cwd,
+                            workers=args.workers, retry_on_kill=args.retry_on_kill))
     elif args.cmd == "start":
         sys.exit(cmd_start(args))
     elif args.cmd == "status":

@@ -39,7 +39,14 @@ operation (a port scan). Reliability of multi-agent execution: 3/10 → 8/10.
 
 ---
 
-### Fix 2 — High-concurrency resource kill (no concurrency cap / adaptive sizing)
+### Fix 2 — High-concurrency resource kill (no concurrency cap / adaptive sizing)  ✅ DONE (2026-06-26)
+**Implemented:** `tools/concurrency.py` — single source of truth for safe parallelism:
+`safe_workers()` (≤400 default, hard cap 512, honours `$TZAR_WORKERS`), `safe_fanout()` (≤ cpu-2),
+`recommend` CLI. `long-run.py` gained `--workers` (sets `$TZAR_WORKERS` for the child) and
+`--retry-on-kill N` (on a signal/resource kill, retries halving workers each time — 400→200→100 —
+so a too-hot scan self-corrects). Coordination SKILL.md documents the convention. Smoke tests added
+(118 passing). Completes the backlog (6/6).
+
 **Gap:** Running 5 parallel scan batches × 1200 worker threads (~6000 concurrent sockets)
 triggered an **external `exit 144` kill** of the processes. There is no platform-level cap on
 concurrent executors or per-executor resource footprint; the operator must discover the limit by
@@ -155,7 +162,7 @@ against `scope.py`), tests in `tools/tests/`.
 | # | Severity | Gap | Effort |
 |---|----------|-----|--------|
 | 1 | High | Executor tasks killed by 2-min Bash timeout | ✅ DONE |
-| 2 | High | Resource kill at high concurrency (no cap) | Med |
+| 2 | High | Resource kill at high concurrency (no cap) | ✅ DONE |
 | 3 | High | Rogue executor re-runs; stand-down not enforced | ✅ DONE |
 | 4 | Medium | Inline coordinator boundary is convention-only | ✅ DONE |
 | 5 | Medium | No tooling/root preflight or graceful degradation | ✅ DONE |

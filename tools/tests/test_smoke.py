@@ -218,6 +218,10 @@ def test_coordinator_guard(tmp_path):
     assert guard("nmap -p- 10.0.0.5") == 2, "coordinator nmap should be blocked"
     assert guard("TZAR_ROLE=executor nmap -p- 10.0.0.5") == 0, "executor marker should allow"
     assert guard("sudo masscan 10.0.0.5 -p80") == 2, "wrapped scanner should be blocked"
+    # shell -c "..." must not hide a scanner (regression for the bash -c bypass)
+    assert guard('bash -c "nmap -p- 10.0.0.5"') == 2, "bash -c scanner should be blocked"
+    assert guard('bash -lc "ffuf -u x"') == 2, "bash -lc scanner should be blocked"
+    assert guard('sh -c "sqlmap -u x"') == 2, "sh -c scanner should be blocked"
     assert guard("python3 tools/session-memory.py list") == 0, "non-scanner should pass"
     assert guard("nmap -p- 10.0.0.5", {"TZAR_COORDINATOR_GUARD": "off"}) == 0, "off mode allows"
     assert guard("nmap -p- 10.0.0.5", {"TZAR_ROLE": "executor"}) == 0, "exported role allows"

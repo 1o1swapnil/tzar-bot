@@ -67,6 +67,34 @@ def _has_executor_marker(command: str) -> bool:
     return bool(_MARKER.search(command))
 
 
+_SHELLS = {"bash", "sh", "zsh", "dash", "ash"}
+
+def _binaries_from_tokens(toks):
+    """Yield the real binary (basename) of a single stage's tokens, stripping leading
+    env-assignments and wrappers, and recursing into `shell -c "<cmd>"`."""
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        if _ASSIGN.match(t):                       # leading VAR=val
+            i += 1; continue
+        base = os.path.basename(t)
+        if base in _SHELLS:
+            # recurse into the quoted command of `shell -c "<cmd>"` — including bundled
+            # short-flag clusters ending in c (-lc, -ec) — so it can't hide a scanner.
+            for j in range(i + 1, len(toks)):
+                if re.match(r"^-[a-z]*c$", toks[j]) and j + 1 < len(toks):
+                    try:
+                        inner = shlex.split(toks[j + 1])
+                    except ValueError:
+                        inner = toks[j + 1].split()
+                    yield from _binaries_from_tokens(inner)
+                    return
+            return
+        if base in WRAPPERS:                        # strip other wrappers (sudo, timeout, xargs…)
+            i += 1; continue
+        yield base
+        return
+
 def _stage_binaries(command: str):
     """Yield the real binary (basename) of each pipeline/operator stage."""
     for stage in _OPERATOR_SPLIT.split(command):
@@ -77,20 +105,7 @@ def _stage_binaries(command: str):
             toks = shlex.split(stage)
         except ValueError:
             toks = stage.split()
-        i = 0
-        while i < len(toks):
-            t = toks[i]
-            if _ASSIGN.match(t):           # leading VAR=val
-                i += 1; continue
-            base = os.path.basename(t)
-            if base in WRAPPERS:           # strip wrapper, look at its command
-                i += 1
-                # bash -c "..." — peek into the quoted command
-                if base in {"bash", "sh", "zsh"}:
-                    break
-                continue
-            yield base
-            break
+        yield from _binaries_from_tokens(toks)
 
 
 def main():

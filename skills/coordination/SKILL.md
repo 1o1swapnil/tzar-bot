@@ -113,9 +113,15 @@ python3 tools/agent-supervisor.py list --output-dir "$OUTPUT_DIR"
 
 # stand-down = hard stop (SIGTERM → SIGKILL), not just a message
 python3 tools/agent-supervisor.py stop --output-dir "$OUTPUT_DIR" --all
-# then clean any orphan still touching this engagement
+# then clean any orphan still touching this engagement — DRY-RUN FIRST
+python3 tools/agent-supervisor.py reap --output-dir "$OUTPUT_DIR" --dry-run
 python3 tools/agent-supervisor.py reap --output-dir "$OUTPUT_DIR"
 ```
+
+> **`reap` safety:** it SIGTERM→SIGKILLs every unregistered process whose cmdline matches the
+> pattern (default = OUTPUT_DIR). It excludes this process and any tzar-bot tool (under `tools/`),
+> but a broad pattern can still catch unintended processes. **Always `--dry-run` first** and prefer a
+> narrow `--pattern` (e.g. the scan-script name) over the default.
 
 `register --owns` flags an ownership collision if two running agents claim the same output dir.
 Combine with idempotent, per-agent output dirs (skip-if-exists) so a rogue re-run cannot overwrite

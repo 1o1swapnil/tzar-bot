@@ -29,6 +29,10 @@ import argparse
 from pathlib import Path
 from datetime import datetime, timezone
 
+# tzar-bot's own tools dir — never reap a platform tool (generate-report, validate-finding,
+# session-memory, …) just because it references the engagement OUTPUT_DIR.
+_TOOLS_DIR = str(Path(__file__).resolve().parent)
+
 
 def _now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -164,17 +168,16 @@ def cmd_stop(args):
               (f"  STILL ALIVE: {survivors}" if survivors else "  (clean)"))
     return 0
 
-def cmd_reap(args):
-    """Kill processes that touch this engagement but are NOT a live registered agent.
-    Default match: the engagement OUTPUT_DIR path in the cmdline; override with --pattern."""
-    reg = _load(args.output_dir)
-    registered = set()
-    for a in reg["agents"].values():
-        if a.get("state") == "running":
-            registered.update(a.get("pids", []))
-    pattern = args.pattern or str(Path(args.output_dir).resolve())
+def _reapable(cmdline, pattern):
+    """A process is reapable iff its cmdline matches the pattern AND is not a tzar-bot
+    platform tool (under tools/). Pure predicate so the safety rule is unit-testable."""
+    return bool(pattern) and pattern in cmdline and _TOOLS_DIR not in cmdline
+
+def _find_orphans(pattern, registered):
+    """Return [(pid, cmdline)] of reapable processes, excluding this process and
+    registered agents."""
     self_pid = os.getpid()
-    victims = []
+    out = []
     for proc in Path("/proc").glob("[0-9]*"):
         try:
             pid = int(proc.name)
@@ -183,8 +186,26 @@ def cmd_reap(args):
         if pid == self_pid or pid in registered:
             continue
         cl = _cmdline(pid)
-        if pattern in cl and "agent-supervisor.py" not in cl:
-            victims.append((pid, cl[:100]))
+        if _reapable(cl, pattern):
+            out.append((pid, cl[:100]))
+    return out
+
+
+def cmd_reap(args):
+    """Kill processes that touch this engagement but are NOT a live registered agent.
+    Default match: the engagement OUTPUT_DIR path in the cmdline; override with --pattern.
+
+    SAFETY: reap sends SIGTERM→SIGKILL to every matching unregistered process. It excludes
+    this process and any tzar-bot platform tool (anything under tools/), but a broad
+    --pattern can still match unintended processes. ALWAYS run with --dry-run first to see
+    the victim list, and prefer a narrow --pattern over the default OUTPUT_DIR match."""
+    reg = _load(args.output_dir)
+    registered = set()
+    for a in reg["agents"].values():
+        if a.get("state") == "running":
+            registered.update(a.get("pids", []))
+    pattern = args.pattern or str(Path(args.output_dir).resolve())
+    victims = _find_orphans(pattern, registered)
     if args.dry_run:
         print(f"  [dry-run] {len(victims)} orphan(s) matching {pattern!r}:")
         for pid, cl in victims:
@@ -227,6 +248,14 @@ def _selftest():
     time.sleep(0.2)
     assert not _alive(proc.pid), "dummy should be dead after stop"
     assert _load(d)["agents"]["dummy"]["state"] == "stopped"
+
+    # reap safety (deterministic predicate test): a rogue scan-script cmdline matching the
+    # pattern is reapable; a tzar tool under tools/ that references the same pattern is NOT.
+    pat = os.path.join(d, "reap-marker")
+    assert _reapable(f"python {d}/scripts/scan.py {pat}", pat), "rogue scan should be reapable"
+    assert not _reapable(f"python {_TOOLS_DIR}/generate-report.py {pat}", pat), \
+        "tzar tool must be excluded from reaping"
+    assert not _reapable(f"python whatever {pat}", ""), "empty pattern must reap nothing"
     print("[+] agent-supervisor selftest OK")
     return 0
 
@@ -255,8 +284,11 @@ def main():
     psp.add_argument("--name"); psp.add_argument("--all", action="store_true")
     psp.add_argument("--grace", type=float, default=3.0); psp.set_defaults(func=cmd_stop)
 
-    pre = sub.add_parser("reap"); pre.add_argument("--output-dir", required=True)
-    pre.add_argument("--pattern", default=""); pre.add_argument("--dry-run", action="store_true")
+    pre = sub.add_parser("reap", help="kill orphan processes touching the engagement "
+                         "(run --dry-run first; excludes tzar tools)")
+    pre.add_argument("--output-dir", required=True)
+    pre.add_argument("--pattern", default="", help="cmdline match (default: OUTPUT_DIR); narrow this")
+    pre.add_argument("--dry-run", action="store_true", help="list victims without killing (recommended first)")
     pre.set_defaults(func=cmd_reap)
 
     args = ap.parse_args()

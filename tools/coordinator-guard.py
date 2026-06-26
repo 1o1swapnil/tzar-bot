@@ -44,21 +44,44 @@ _MARKER = re.compile(r"\b(?:TZAR_ROLE=(?:executor|validator)|TZAR_EXEC=1)\b")
 
 
 def _active_engagement() -> bool:
+    """True only when an engagement is genuinely active. An explicit OUTPUT_DIR always
+    counts; otherwise we fall back to memory.db but IGNORE a stale active row (a forgotten
+    'active' engagement must not gate scanners globally for days). Staleness window via
+    $TZAR_ACTIVE_TTL_HOURS (default 24h). Unparseable/missing timestamp → conservatively
+    treated as active so the boundary is never silently dropped."""
     out = os.environ.get("OUTPUT_DIR", "")
     if out and (Path(out) / "engagement.json").exists():
         return True
     try:
+        ttl_h = float(os.environ.get("TZAR_ACTIVE_TTL_HOURS", "24"))
+    except ValueError:
+        ttl_h = 24.0
+    try:
         import sqlite3
         db = REPO_DIR / "memory.db"
-        if db.exists():
-            conn = sqlite3.connect(db)
-            row = conn.execute(
-                "SELECT 1 FROM engagements WHERE status='active' LIMIT 1").fetchone()
-            conn.close()
-            return bool(row)
+        if not db.exists():
+            return False
+        conn = sqlite3.connect(db)
+        row = conn.execute(
+            "SELECT last_updated FROM engagements WHERE status='active' "
+            "ORDER BY last_updated DESC LIMIT 1").fetchone()
+        conn.close()
+        if not row:
+            return False
+        ts = (row[0] or "").strip()
+        if not ts:
+            return True  # active row but no timestamp → conservative: gate
+        from datetime import datetime, timezone
+        try:
+            parsed = datetime.fromisoformat(ts)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return True  # can't parse → conservative: gate
+        age_h = (datetime.now(timezone.utc) - parsed).total_seconds() / 3600.0
+        return age_h <= ttl_h
     except Exception:
-        pass
-    return False
+        return False
 
 
 def _has_executor_marker(command: str) -> bool:

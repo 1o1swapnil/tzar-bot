@@ -41,7 +41,7 @@ HELP_TOOLS = [
     "lint-skills.py", "memory-search.py", "notify.py", "scope.py",
     "scrub-web-content.py", "se-dashboard.py", "sync-bughunter.py",
     "token-meter.py", "rate-limiter.py", "report-export.py", "mitre-lookup.py",
-    "atomic-red.py", "long-run.py", "preflight.py",
+    "atomic-red.py", "long-run.py", "preflight.py", "agent-supervisor.py",
 ]
 
 TIMEOUT = 90
@@ -126,6 +126,20 @@ def test_long_run_selftest():
 
 def test_preflight_selftest():
     assert tool("preflight.py", "--selftest").returncode == 0
+
+
+def test_agent_supervisor_selftest():
+    assert tool("agent-supervisor.py", "--selftest").returncode == 0
+
+
+def test_agent_supervisor_register_list(tmp_path):
+    out = str(tmp_path)
+    assert tool("agent-supervisor.py", "register", "--output-dir", out,
+                "--name", "exec-1", "--pid", str(os.getpid()), "--owns", "recon/a").returncode == 0
+    r = tool("agent-supervisor.py", "list", "--output-dir", out, "--json")
+    assert r.returncode == 0
+    data = json.loads(r.stdout)
+    assert any(a["name"] == "exec-1" and a["owns"] == "recon/a" for a in data)
 
 
 def test_preflight_check_json():

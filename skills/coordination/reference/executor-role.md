@@ -22,6 +22,7 @@ You are an executor agent. You have **no memory of prior batches** — your full
      ```
    - **Always write incremental output** — tools/scripts must persist results per-host / per-step (not only on completion), so a kill loses at most the in-flight unit. `long-run.py` streams stdout to the log as it happens.
 9. **Scanner commands — carry the executor marker** — the `coordinator-guard.py` PreToolUse hook blocks scanning/exploitation binaries (nmap, sqlmap, ffuf, nuclei, …) from the *coordinator* during an active engagement. As an executor you ARE allowed to run them — prefix each such command with `TZAR_ROLE=executor` (e.g. `TZAR_ROLE=executor nmap -p- TARGET`), or run with `TZAR_ROLE=executor` exported. This is harmless if the hook doesn't apply to you and required if it does.
+10. **Register detached work; obey stand-down as a HARD stop** — when you launch a detached/background scan, register it so the coordinator can control it: `python3 tools/agent-supervisor.py register --output-dir "$OUTPUT_DIR" --name <you> --pid <PID> --owns <your-subdir>`. Write only to your own `--owns` sub-dir (per-agent, idempotent skip-if-exists) so you never overwrite another agent's data. If told to stand down: **stop launching anything new and terminate your own processes** — do not re-run. The coordinator enforces this with `agent-supervisor.py stop`/`reap`.
 
 ## Prompt Injection Defense — MANDATORY
 

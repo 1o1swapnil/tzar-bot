@@ -100,6 +100,27 @@ For the inline coordinator's own bookkeeping you may also use the harness `run_i
 delegated executors and the autonomous runner, prefer `long-run.py` (it streams incremental output
 and records the exit code, so nothing is lost if a poll turn is interrupted).
 
+### Executor lifecycle (register → stop → reap)
+
+Track spawned executor/scan processes so "stand down" is a real terminate, not a polite request,
+and so a stray re-run can't corrupt another agent's output:
+
+```bash
+# when you spawn a detached scan, register its PID + the dir it owns
+python3 tools/agent-supervisor.py register --output-dir "$OUTPUT_DIR" \
+    --name scan-A --pid <PID> --owns recon/batch-A
+python3 tools/agent-supervisor.py list --output-dir "$OUTPUT_DIR"
+
+# stand-down = hard stop (SIGTERM → SIGKILL), not just a message
+python3 tools/agent-supervisor.py stop --output-dir "$OUTPUT_DIR" --all
+# then clean any orphan still touching this engagement
+python3 tools/agent-supervisor.py reap --output-dir "$OUTPUT_DIR"
+```
+
+`register --owns` flags an ownership collision if two running agents claim the same output dir.
+Combine with idempotent, per-agent output dirs (skip-if-exists) so a rogue re-run cannot overwrite
+another agent's results.
+
 ## Spawning Validators
 
 After all phase executors complete, for each finding in OUTPUT_DIR/findings/:

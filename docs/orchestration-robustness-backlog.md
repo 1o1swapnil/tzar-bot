@@ -56,7 +56,14 @@ threshold. Caused a full restart of the scan. Parallel-execution safety: 4/10 �
 
 ---
 
-### Fix 3 — Executor lifecycle: rogue re-runs, stand-down not enforced
+### Fix 3 — Executor lifecycle: rogue re-runs, stand-down not enforced  ✅ DONE (2026-06-26)
+**Implemented:** `tools/agent-supervisor.py` — a per-engagement registry (`<output-dir>/.agents/registry.json`)
+of spawned processes (PIDs + owned output dir). `register`/`claim` (with ownership-collision detection),
+`list`, `stop --name|--all` (SIGTERM→SIGKILL, process-group aware, zombie-safe), and `reap` (kill orphan
+processes whose cmdline touches the engagement but aren't a live registered agent). Coordinator
+(SKILL.md) + executor-role rule 10 now make stand-down a HARD stop (register → stop → reap) with
+per-agent idempotent output dirs. Smoke tests added (113 passing).
+
 **Gap:** After the coordinator told `Agent`-spawned executors to **stand down**, one autonomously
 **re-launched a scan** (colliding with the coordinator's own re-run and corrupting shared output
 dirs). Stand-down was advisory; only an explicit `shutdown_request` actually stopped the agents,
@@ -149,7 +156,7 @@ against `scope.py`), tests in `tools/tests/`.
 |---|----------|-----|--------|
 | 1 | High | Executor tasks killed by 2-min Bash timeout | ✅ DONE |
 | 2 | High | Resource kill at high concurrency (no cap) | Med |
-| 3 | High | Rogue executor re-runs; stand-down not enforced | Med–High |
+| 3 | High | Rogue executor re-runs; stand-down not enforced | ✅ DONE |
 | 4 | Medium | Inline coordinator boundary is convention-only | ✅ DONE |
 | 5 | Medium | No tooling/root preflight or graceful degradation | ✅ DONE |
 | 6 | Medium | Scope-check blind to `-iL` file targets | ✅ DONE |

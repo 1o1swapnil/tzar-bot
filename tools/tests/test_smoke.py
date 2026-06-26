@@ -41,7 +41,7 @@ HELP_TOOLS = [
     "lint-skills.py", "memory-search.py", "notify.py", "scope.py",
     "scrub-web-content.py", "se-dashboard.py", "sync-bughunter.py",
     "token-meter.py", "rate-limiter.py", "report-export.py", "mitre-lookup.py",
-    "atomic-red.py",
+    "atomic-red.py", "long-run.py",
 ]
 
 TIMEOUT = 90
@@ -118,6 +118,10 @@ def test_mitre_lookup_offline():
     # map returns candidate techniques for a finding description
     r3 = tool("mitre-lookup.py", "map", "cleartext http credential sniffing", "--json")
     assert r3.returncode == 0 and json.loads(r3.stdout)
+
+
+def test_long_run_selftest():
+    assert tool("long-run.py", "--selftest").returncode == 0
 
 
 def test_atomic_red_offline():

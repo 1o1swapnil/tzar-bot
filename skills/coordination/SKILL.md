@@ -86,6 +86,20 @@ Use python3 tools/env-reader.py for any credentials.""",
 
 Spawn parallel agents in a **single message** for phases that allow parallel execution.
 
+**Long-running tools (>10 min) — don't let them die to a timeout.** Background `Agent` executors run
+their tool through the Bash tool, which is killed at its timeout (~2 min default, 10 min max). For
+full port sweeps, brute force, or any multi-minute tool, instruct the executor to launch it detached
+and poll, instead of running it inline:
+
+```bash
+python3 tools/long-run.py start --log "$OUTPUT_DIR/recon/nmap-full.log" -- nmap -p- -sS TARGET
+python3 tools/long-run.py status --log "$OUTPUT_DIR/recon/nmap-full.log" --tail 20   # later turns
+```
+
+For the inline coordinator's own bookkeeping you may also use the harness `run_in_background`; for
+delegated executors and the autonomous runner, prefer `long-run.py` (it streams incremental output
+and records the exit code, so nothing is lost if a poll turn is interrupted).
+
 ## Spawning Validators
 
 After all phase executors complete, for each finding in OUTPUT_DIR/findings/:

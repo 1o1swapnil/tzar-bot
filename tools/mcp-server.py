@@ -116,15 +116,15 @@ TOOL_DEFS = [
             "Look up Red Canary Atomic Red Team detection-validation tests, keyed by MITRE "
             "ATT&CK technique, from a local offline index. action 'lookup' lists tests for a "
             "technique ID, 'search' finds tests by keyword, 'show' returns one test's full "
-            "command+cleanup, 'for-finding' maps a finding description to techniques then to "
+            "command+cleanup, 'map' maps a finding description to techniques then to "
             "atomic tests, 'stats' shows coverage. READ-ONLY: returns test definitions/commands; "
             "it never executes them (run atomics only in an authorized lab via Invoke-AtomicRedTeam)."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action":   {"type": "string", "enum": ["lookup", "search", "show", "for-finding", "stats"]},
-                "query":    {"type": "string", "description": "Technique ID (lookup/show), keywords (search), or finding text (for-finding)"},
+                "action":   {"type": "string", "enum": ["lookup", "search", "show", "map", "stats"]},
+                "query":    {"type": "string", "description": "Technique ID (lookup/show), keywords (search), or finding text (map)"},
                 "platform": {"type": "string", "enum": ["windows", "linux", "macos"], "description": "Optional platform filter"},
                 "test":     {"type": "integer", "description": "show: 1-based test number"},
                 "guid":     {"type": "string", "description": "show: select test by GUID"},
@@ -535,16 +535,16 @@ def tool_mitre_lookup(args):
 
 def tool_atomic_red(args):
     action = args.get("action")
-    if action not in {"lookup", "search", "show", "for-finding", "stats"}:
+    if action not in {"lookup", "search", "show", "map", "stats"}:
         return f"Invalid action: {action!r}", True
     cmd = [PYTHON, str(TOOLS_DIR / "atomic-red.py"), action]
-    needs_query = action in {"lookup", "search", "show", "for-finding"}
+    needs_query = action in {"lookup", "search", "show", "map"}
     q = (args.get("query") or "").strip()
     if needs_query and not q:
         return f"action '{action}' requires 'query'", True
     if args.get("platform") and action != "stats":
         cmd += ["--platform", args["platform"]]
-    if action in {"search", "for-finding"} and args.get("limit"):
+    if action in {"search", "map"} and args.get("limit"):
         cmd += ["--limit", str(int(args["limit"]))]
     if action == "show":
         if args.get("guid"):

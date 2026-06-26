@@ -15,7 +15,7 @@ Usage:
   python3 tools/atomic-red.py lookup T1133                 # tests for a technique
   python3 tools/atomic-red.py search "vpn"                 # search by name/description
   python3 tools/atomic-red.py show T1133 --test 1          # full detail incl command + cleanup
-  python3 tools/atomic-red.py for-finding "ssl vpn exposed" [--limit 5]   # map finding -> technique -> atomics
+  python3 tools/atomic-red.py map "ssl vpn exposed" [--limit 5]   # finding -> technique -> atomic tests
   python3 tools/atomic-red.py stats
   (--platform windows|linux|macos to filter; --json for machine-readable output)
 
@@ -204,7 +204,7 @@ def cmd_show(args):
     _emit(args, sel, human)
     return 0
 
-def cmd_for_finding(args):
+def cmd_map(args):
     """Cross-link: map a finding -> ATT&CK technique IDs (via mitre-lookup) -> atomic tests."""
     idx = load()
     mitre = TOOLS_DIR / "mitre-lookup.py"
@@ -291,9 +291,9 @@ def main():
     psh.add_argument("--guid", help="select test by GUID")
     common(psh); psh.set_defaults(func=cmd_show)
 
-    pf = sub.add_parser("for-finding", help="map a finding to techniques -> atomic tests")
+    pf = sub.add_parser("map", help="map a finding -> techniques -> atomic tests")
     pf.add_argument("text"); pf.add_argument("--limit", type=int, default=5)
-    common(pf); pf.set_defaults(func=cmd_for_finding)
+    common(pf); pf.set_defaults(func=cmd_map)
 
     pst = sub.add_parser("stats", help="local index stats")
     common(pst, platform=False); pst.set_defaults(func=cmd_stats)

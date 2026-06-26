@@ -277,6 +277,10 @@ def _load_items(a):
 
 
 def main():
+    # Convention: every tzar-bot tool accepts `--selftest` (the `selftest` subcommand
+    # is kept as a back-compat alias).
+    if "--selftest" in sys.argv:
+        _selftest(); return
     ap = argparse.ArgumentParser(description="Resumable, scope-guarded engagement ledger.")
     ap.add_argument("--output-dir", help="engagement OUTPUT_DIR (default: $OUTPUT_DIR)")
     sub = ap.add_subparsers(dest="cmd", required=True)

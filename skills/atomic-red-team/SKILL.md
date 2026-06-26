@@ -39,21 +39,21 @@ python3 tools/atomic-red.py show T1040 --test 1
 python3 tools/atomic-red.py show T1003 --guid <auto_generated_guid>
 
 # Chain: finding text -> ATT&CK techniques (mitre-lookup) -> atomic tests
-python3 tools/atomic-red.py for-finding "external remote service exposed; credential sniffing" --limit 5
+python3 tools/atomic-red.py map "external remote service exposed; credential sniffing" --limit 5
 ```
 Add `--json` to any command for machine-readable output (used by the MCP `atomic_red` tool).
 
 ## Workflow (engagement → detection validation)
 1. After findings are mapped to ATT&CK ([[mitre-attack]]), run
-   `for-finding "<finding title + impact>"` to get the candidate techniques and their atomic tests.
+   `map "<finding title + impact>"` to get the candidate techniques and their atomic tests.
 2. Review each test with `show <Txxxx> --test N` — read the command, platforms, elevation, and cleanup.
 3. Hand the technique IDs to the blue team to run in an **authorized lab** (`Invoke-AtomicTest <Txxxx>`)
    and confirm the detection fires; record gaps.
 4. Feed detection gaps into the report's recommendations and [[mid-engagement-ir-detection]] baselines.
 
 ## Integration points
-- **MCP:** `atomic_red` tool (mcp-server.py) — action = lookup|search|show|for-finding|stats.
-- **Cross-tool:** `for-finding` calls `mitre-lookup map` then resolves atomics per technique; keep the
+- **MCP:** `atomic_red` tool (mcp-server.py) — action = lookup|search|show|map|stats.
+- **Cross-tool:** `map` calls `mitre-lookup map` then resolves atomics per technique; keep the
   MITRE index built (`python3 tools/mitre-lookup.py update --matrix all`).
 - **Caveat:** not every ATT&CK technique has an atomic test (esp. ICS/recon); a `0 atomic test(s)` result
   is normal, not an error.

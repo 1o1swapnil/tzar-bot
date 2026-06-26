@@ -38,20 +38,34 @@ Tools that take subcommands draw verbs from one vocabulary so behaviour is predi
 
 **Do not** invent a synonym for an existing verb (e.g. use `map`, never `for-finding`).
 
-## 5. Standard flags
+## 5. The engagement directory — one resolution everywhere
+Every engagement-scoped tool resolves the OUTPUT_DIR the same way, in this order:
+
+1. **`--output-dir DIR`** flag (canonical), then
+2. **positional** argument (back-compat for tools that historically took it positionally), then
+3. **`$OUTPUT_DIR`** environment variable (exported by `init-engagement.py`).
+
+So all of these are equivalent and accepted:
+```bash
+python3 tools/validate-finding.py --output-dir "$OUTPUT_DIR" --all
+python3 tools/validate-finding.py "$OUTPUT_DIR" --all          # positional, still works
+OUTPUT_DIR=… python3 tools/validate-finding.py --all           # env, no arg needed
+```
+Aligned tools: `generate-report`, `report-export`, `validate-finding`, `token-meter`,
+`session-memory` (save/load), plus the already-flagged `preflight`, `agent-supervisor`,
+`engagement-state`, `notify`, `gen-nuclei-template`, `se-dashboard`.
+
+**Multi-dir exception:** `continuous-scan.py` operates on *two* dirs (`delta NEW BASE`), so it keeps
+positional arguments — there is no single OUTPUT_DIR to flag.
+
+## 5b. Other standard flags
 | Flag | Use |
 |------|-----|
-| `--output-dir DIR` | engagement OUTPUT_DIR (subcommand/utility tools) |
 | `--json` | machine-readable output |
 | `--selftest` | internal self-test |
 | `--limit N` | cap result count for `search` / `map` |
 | `--matrix` / `--platform` | data-set filters (ATT&CK matrix, OS platform) |
 | `--dry-run` | show what would happen without doing it |
-
-**Exception (legacy, positional OUTPUT_DIR):** the single-action report/validation/memory tools
-`generate-report.py`, `validate-finding.py`, `report-export.py`, `session-memory.py`,
-`continuous-scan.py`, `token-meter.py` take the engagement dir as a **positional** argument
-(`… OUTPUT_DIR …`). New tools use `--output-dir`.
 
 ## 6. Exit codes
 `0` success · `1` usage/runtime error · `2` blocked / not-found · `3` conflict (e.g. ownership

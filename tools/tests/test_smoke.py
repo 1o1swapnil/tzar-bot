@@ -223,6 +223,21 @@ def test_coordinator_guard(tmp_path):
     assert guard("nmap -p- 10.0.0.5", {"TZAR_ROLE": "executor"}) == 0, "exported role allows"
 
 
+def test_output_dir_convention(tmp_path):
+    """Engagement-dir tools accept --output-dir AND $OUTPUT_DIR AND positional (back-compat)."""
+    d = str(tmp_path)
+    # --output-dir flag: resolves to d (no findings/ → exit 2, but path is echoed)
+    r1 = tool("validate-finding.py", "--output-dir", d, "--all")
+    assert d in (r1.stdout + r1.stderr), "—output-dir not resolved"
+    # $OUTPUT_DIR env, no positional
+    r2 = run([PY, str(TOOLS / "validate-finding.py"), "--all"],
+             env={**os.environ, "OUTPUT_DIR": d})
+    assert d in (r2.stdout + r2.stderr), "$OUTPUT_DIR not resolved"
+    # positional still works
+    r3 = tool("validate-finding.py", d, "--all")
+    assert d in (r3.stdout + r3.stderr), "positional dir broke"
+
+
 def test_scope_check_resolves_target_file(tmp_path):
     """-iL/--target-file targets hidden in a file must be scope-checked (backlog #6)."""
     eng = tmp_path / "eng"; eng.mkdir()

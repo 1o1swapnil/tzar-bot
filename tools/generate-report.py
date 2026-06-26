@@ -1073,8 +1073,11 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("output_dir",
-                    help="Engagement OUTPUT_DIR (or path to pentest-report.json)")
+    ap.add_argument("output_dir", nargs="?",
+                    help="Engagement OUTPUT_DIR (or path to pentest-report.json). "
+                         "May also be given as --output-dir or via $OUTPUT_DIR.")
+    ap.add_argument("--output-dir", dest="output_dir_opt", default="",
+                    help="Engagement OUTPUT_DIR (alternative to the positional form)")
     ap.add_argument("reports_dir", nargs="?",
                     help="Override reports output directory")
     ap.add_argument("--client",  default="", help="Client name")
@@ -1089,7 +1092,11 @@ def main():
                     ))
     args = ap.parse_args()
 
-    output_dir = Path(args.output_dir).resolve()
+    # Resolve engagement dir: --output-dir flag → positional → $OUTPUT_DIR env.
+    _od = args.output_dir_opt or args.output_dir or os.environ.get("OUTPUT_DIR", "")
+    if not _od:
+        ap.error("engagement dir required: pass it positionally, with --output-dir, or set $OUTPUT_DIR")
+    output_dir = Path(_od).resolve()
 
     # Legacy JSON mode: python3 generate-report.py findings.json reports/
     if output_dir.suffix == ".json":

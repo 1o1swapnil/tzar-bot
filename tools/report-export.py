@@ -19,6 +19,7 @@ Writes (under OUTPUT_DIR/reports/ by default):
     report.json   and/or   report.html
 """
 
+import os
 import re
 import sys
 import json
@@ -200,14 +201,20 @@ def build_html(findings, meta):
 
 def main():
     ap = argparse.ArgumentParser(description="Offline JSON/HTML report export (no reportlab).")
-    ap.add_argument("output_dir", help="Engagement OUTPUT_DIR")
+    ap.add_argument("output_dir", nargs="?", help="Engagement OUTPUT_DIR "
+                    "(or use --output-dir / $OUTPUT_DIR)")
+    ap.add_argument("--output-dir", dest="output_dir_opt", default="",
+                    help="Engagement OUTPUT_DIR (alternative to the positional form)")
     ap.add_argument("--format", choices=["json", "html", "both"], default="both")
     ap.add_argument("--client", default="")
     ap.add_argument("--target", default="")
     ap.add_argument("--out-dir", default="", help="Output dir (default: OUTPUT_DIR/reports)")
     a = ap.parse_args()
 
-    output_dir = Path(a.output_dir).resolve()
+    _od = a.output_dir_opt or a.output_dir or os.environ.get("OUTPUT_DIR", "")
+    if not _od:
+        ap.error("engagement dir required: pass it positionally, with --output-dir, or set $OUTPUT_DIR")
+    output_dir = Path(_od).resolve()
     if not output_dir.exists():
         print(f"[ERROR] OUTPUT_DIR not found: {output_dir}", file=sys.stderr)
         sys.exit(1)

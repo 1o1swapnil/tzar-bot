@@ -718,17 +718,28 @@ def cmd_scan_history(output_dir):
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
-    args = sys.argv[1:]
+    raw = sys.argv[1:]
+    # Extract --output-dir VALUE / --output-dir=VALUE (alternative to the positional dir).
+    od_flag, args, i = "", [], 0
+    while i < len(raw):
+        a = raw[i]
+        if a == "--output-dir" and i + 1 < len(raw):
+            od_flag = raw[i + 1]; i += 2; continue
+        if a.startswith("--output-dir="):
+            od_flag = a.split("=", 1)[1]; i += 1; continue
+        args.append(a); i += 1
     if not args:
         print(__doc__)
         sys.exit(0)
 
     cmd = args[0]
+    # For dir-first verbs: positional → --output-dir → $OUTPUT_DIR env.
+    _dir1 = (args[1] if len(args) >= 2 else "") or od_flag or os.environ.get("OUTPUT_DIR", "")
 
-    if cmd == "save" and len(args) >= 2:
-        cmd_save(args[1])
-    elif cmd == "load" and len(args) >= 2:
-        cmd_load(args[1])
+    if cmd == "save" and _dir1:
+        cmd_save(_dir1)
+    elif cmd == "load" and _dir1:
+        cmd_load(_dir1)
     elif cmd == "list":
         cmd_list(args[1:])
     elif cmd == "search" and len(args) >= 2:

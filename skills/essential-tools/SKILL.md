@@ -118,3 +118,4 @@ socat TCP-LISTEN:4444,reuseaddr,fork EXEC:/bin/bash,pty,stderr,setsid,sigint,san
 The inline sections above are **quick-start orchestration**. For real testing of any area below, the `reference/` file is the **source of truth** (curated from disclosed reports — payloads, bypass tables, chain templates). Load it before deep testing; don't rely on the quick-start commands alone.
 
 - `reference/security-arsenal.md` — Security payloads, bypass tables, wordlists, gf pattern names, always-rejected bug list, and conditionally-valid-with-chain table.
+- `reference/wordlist-map.md` — Canonical vuln-class → on-disk SecLists/wordlist path map for this Kali box. Load whenever an executor needs a wordlist or payload file for fuzzing so it points at the correct `/usr/share/seclists/...` path instead of a guessed or broken one.

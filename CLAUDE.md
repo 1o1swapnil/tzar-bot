@@ -73,6 +73,7 @@ Skills live in `skills/` — each a `SKILL.md` plus a `reference/` folder. **Two
 | **Web vuln-class depth** | `hunt-saml`, `hunt-nosqli`, `hunt-ldap`, `hunt-deserialization`, `hunt-http-smuggling`, `hunt-host-header`, `hunt-cache-poison`, `hunt-open-redirect`, `hunt-websocket`, `hunt-grpc` |
 | **Framework-specific** | `hunt-aspnet`, `hunt-laravel`, `hunt-nextjs`, `hunt-nodejs`, `hunt-springboot` |
 | **Infrastructure** | `infrastructure`, `system`, `cloud-containers`, `cloud-iam-deep`, `hunt-cicd`, `hunt-tls-network`, `hunt-ntlm-info` |
+| **Post-exploitation / AD** | `hunt-active-directory`, `privilege-escalation` |
 | **Enterprise identity & perimeter** | `m365-entra-attack`, `okta-attack`, `vmware-vcenter-attack`, `enterprise-vpn-attack`, `hunt-sharepoint`, `supply-chain-attack-recon` |
 | **AI/ML model governance** | `bias-fairness-testing`, `model-robustness`, `model-monitoring`, `incident-response` |
 | **Wireless / Mobile** | `wireless`, `mapt` |

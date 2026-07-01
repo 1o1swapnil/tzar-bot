@@ -501,7 +501,8 @@ def build_parser():
     sub = p.add_subparsers(dest="cmd")
 
     r = sub.add_parser("record", help="Record one token-usage event")
-    r.add_argument("output_dir")
+    r.add_argument("output_dir", nargs="?")
+    r.add_argument("--output-dir", dest="output_dir_opt", default="")
     r.add_argument("--role", default="executor",
                    choices=["coordinator", "executor", "validator", "other"])
     r.add_argument("--agent", default=None)
@@ -516,11 +517,13 @@ def build_parser():
     r.set_defaults(func=cmd_record)
 
     rp = sub.add_parser("report", help="Per-role/phase/agent/model breakdown")
-    rp.add_argument("output_dir")
+    rp.add_argument("output_dir", nargs="?")
+    rp.add_argument("--output-dir", dest="output_dir_opt", default="")
     rp.set_defaults(func=cmd_report)
 
     b = sub.add_parser("budget", help="Show or set an engagement token/USD budget")
-    b.add_argument("output_dir")
+    b.add_argument("output_dir", nargs="?")
+    b.add_argument("--output-dir", dest="output_dir_opt", default="")
     b.add_argument("--set-tokens", dest="set_tokens", type=int, default=None)
     b.add_argument("--set-usd", dest="set_usd", type=float, default=None)
     b.set_defaults(func=cmd_budget)
@@ -550,6 +553,12 @@ def main():
     if not getattr(args, "func", None):
         parser.print_help()
         sys.exit(0)
+    # Unify engagement dir: --output-dir flag → positional → $OUTPUT_DIR env.
+    if hasattr(args, "output_dir"):
+        args.output_dir = (getattr(args, "output_dir_opt", "") or args.output_dir
+                           or os.environ.get("OUTPUT_DIR", ""))
+        if not args.output_dir:
+            parser.error("engagement dir required (positional, --output-dir, or $OUTPUT_DIR)")
     args.func(args)
 
 

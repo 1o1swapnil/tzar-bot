@@ -40,7 +40,9 @@ HELP_TOOLS = [
     "engagement-state.py", "gen-nuclei-template.py", "init-engagement.py",
     "lint-skills.py", "memory-search.py", "notify.py", "scope.py",
     "scrub-web-content.py", "se-dashboard.py", "sync-bughunter.py",
-    "token-meter.py", "rate-limiter.py", "report-export.py",
+    "token-meter.py", "rate-limiter.py", "report-export.py", "mitre-lookup.py",
+    "atomic-red.py", "long-run.py", "preflight.py", "agent-supervisor.py",
+    "concurrency.py",
 ]
 
 TIMEOUT = 90
@@ -54,25 +56,27 @@ def run(args, stdin=None, env=None, cwd=REPO):
     )
 
 
-def tool(name, *cli):
-    return run([PY, str(TOOLS / name), *cli])
+def tool(name, *cli, env=None):
+    return run([PY, str(TOOLS / name), *cli], env=env)
 
 
 # ── JSON-RPC (MCP) helper ─────────────────────────────────────────────────────
 
 def _frame(obj):
-    b = json.dumps(obj).encode()
-    return f"Content-Length: {len(b)}\r\n\r\n".encode() + b
+    # Newline-delimited JSON-RPC (MCP stdio framing, per the servers since e70f2f0)
+    return json.dumps(obj).encode() + b"\n"
 
 
 def _parse_frames(raw: bytes):
-    msgs, buf = [], raw
-    while buf.startswith(b"Content-Length:"):
-        hdr_end = buf.index(b"\r\n\r\n")
-        length = int(buf[len("Content-Length:"):hdr_end].strip())
-        start = hdr_end + 4
-        msgs.append(json.loads(buf[start:start + length]))
-        buf = buf[start + length:]
+    msgs = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msgs.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue  # skip any non-JSON log lines
     return msgs
 
 
@@ -102,8 +106,169 @@ def test_help_exits_zero(name):
 
 # ── 3. Built-in self-tests ────────────────────────────────────────────────────
 
+def test_mitre_lookup_offline():
+    # stats reads the committed local index (no network)
+    r = tool("mitre-lookup.py", "stats")
+    assert r.returncode == 0, r.stderr
+    assert "enterprise" in r.stdout and "mobile" in r.stdout and "ics" in r.stdout
+    # lookup a stable enterprise technique as JSON
+    r2 = tool("mitre-lookup.py", "lookup", "T1133", "--matrix", "enterprise", "--json")
+    assert r2.returncode == 0, r2.stderr
+    data = json.loads(r2.stdout)
+    assert data and data[0]["id"] == "T1133"
+    # map returns candidate techniques for a finding description
+    r3 = tool("mitre-lookup.py", "map", "cleartext http credential sniffing", "--json")
+    assert r3.returncode == 0 and json.loads(r3.stdout)
+
+
+def test_long_run_selftest():
+    assert tool("long-run.py", "--selftest").returncode == 0
+
+
+def test_concurrency_selftest():
+    assert tool("concurrency.py", "--selftest").returncode == 0
+
+
+def test_concurrency_caps(tmp_path):
+    r = tool("concurrency.py", "recommend", "--workers", "1200", "--items", "30", "--json")
+    assert r.returncode == 0, r.stderr
+    d = json.loads(r.stdout)
+    assert d["workers_per_process"] <= d["hard_cap"], "workers not capped"
+    assert d["workers_per_process"] < 1200, "over-request should be reduced"
+    assert d["parallel_fanout"] >= 1
+
+
+def test_long_run_retry_lowers_concurrency(tmp_path):
+    """long-run retries a resource-killed unit at halved TZAR_WORKERS until it succeeds."""
+    import time
+    flaky = tmp_path / "flaky.py"
+    flaky.write_text(
+        "import os, sys\n"
+        "w = int(os.environ.get('TZAR_WORKERS', '0'))\n"
+        "sys.exit(137 if w > 100 else 0)\n")
+    log = tmp_path / "r.log"
+    r = run([PY, str(TOOLS / "long-run.py"), "start", "--log", str(log),
+             "--workers", "400", "--retry-on-kill", "3", "--", PY, str(flaky)])
+    assert r.returncode == 0, r.stderr
+    status = Path(str(log) + ".status")
+    for _ in range(100):
+        if status.exists():
+            st = json.loads(status.read_text())
+            if st.get("state") in ("done", "failed"):
+                break
+        time.sleep(0.05)
+    st = json.loads(status.read_text())
+    assert st["state"] == "done" and st["exit_code"] == 0, st
+    assert st.get("attempts", 1) >= 2, "should have retried at lower concurrency"
+
+
+def test_preflight_selftest():
+    assert tool("preflight.py", "--selftest").returncode == 0
+
+
+def test_agent_supervisor_selftest():
+    assert tool("agent-supervisor.py", "--selftest").returncode == 0
+
+
+def test_agent_supervisor_register_list(tmp_path):
+    out = str(tmp_path)
+    assert tool("agent-supervisor.py", "register", "--output-dir", out,
+                "--name", "exec-1", "--pid", str(os.getpid()), "--owns", "recon/a").returncode == 0
+    r = tool("agent-supervisor.py", "list", "--output-dir", out, "--json")
+    assert r.returncode == 0
+    data = json.loads(r.stdout)
+    assert any(a["name"] == "exec-1" and a["owns"] == "recon/a" for a in data)
+
+
+def test_preflight_check_json():
+    r = tool("preflight.py", "check", "--type", "Network", "--json")
+    assert r.returncode == 0, r.stderr
+    d = json.loads(r.stdout)
+    assert d["engagement_type"] == "Network" and "root_capable" in d["root"]
+    assert any(t["tool"] == "nmap" for t in d["tools"])
+
+
+def test_atomic_red_offline():
+    # stats reads the committed local index (no network)
+    r = tool("atomic-red.py", "stats")
+    assert r.returncode == 0, r.stderr
+    assert "atomic tests" in r.stdout
+    # lookup a stable technique as JSON
+    r2 = tool("atomic-red.py", "lookup", "T1040", "--json")
+    assert r2.returncode == 0, r2.stderr
+    data = json.loads(r2.stdout)
+    assert data["id"] == "T1040" and isinstance(data["tests"], list)
+
+
 def test_scope_selftest():
     assert tool("scope.py", "--selftest").returncode == 0
+
+
+def test_coordinator_guard(tmp_path):
+    """Coordinator boundary: scanners blocked inline during an engagement; executor marker allows."""
+    eng = tmp_path / "eng"; eng.mkdir()
+    (eng / "engagement.json").write_text(json.dumps({"in_scope": ["10.0.0.0/24"]}))
+    env = {**os.environ, "OUTPUT_DIR": str(eng)}
+
+    def guard(cmd, extra_env=None):
+        e = {**env, **(extra_env or {})}
+        hook = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
+        return run([PY, str(TOOLS / "coordinator-guard.py")], stdin=hook, env=e).returncode
+
+    assert guard("nmap -p- 10.0.0.5") == 2, "coordinator nmap should be blocked"
+    assert guard("TZAR_ROLE=executor nmap -p- 10.0.0.5") == 0, "executor marker should allow"
+    assert guard("sudo masscan 10.0.0.5 -p80") == 2, "wrapped scanner should be blocked"
+    # shell -c "..." must not hide a scanner (regression for the bash -c bypass)
+    assert guard('bash -c "nmap -p- 10.0.0.5"') == 2, "bash -c scanner should be blocked"
+    assert guard('bash -lc "ffuf -u x"') == 2, "bash -lc scanner should be blocked"
+    assert guard('sh -c "sqlmap -u x"') == 2, "sh -c scanner should be blocked"
+    assert guard("python3 tools/session-memory.py list") == 0, "non-scanner should pass"
+    assert guard("nmap -p- 10.0.0.5", {"TZAR_COORDINATOR_GUARD": "off"}) == 0, "off mode allows"
+    assert guard("nmap -p- 10.0.0.5", {"TZAR_ROLE": "executor"}) == 0, "exported role allows"
+
+
+def test_output_dir_convention(tmp_path):
+    """Engagement-dir tools accept --output-dir AND $OUTPUT_DIR AND positional (back-compat)."""
+    d = str(tmp_path)
+    # --output-dir flag: resolves to d (no findings/ → exit 2, but path is echoed)
+    r1 = tool("validate-finding.py", "--output-dir", d, "--all")
+    assert d in (r1.stdout + r1.stderr), "—output-dir not resolved"
+    # $OUTPUT_DIR env, no positional
+    r2 = run([PY, str(TOOLS / "validate-finding.py"), "--all"],
+             env={**os.environ, "OUTPUT_DIR": d})
+    assert d in (r2.stdout + r2.stderr), "$OUTPUT_DIR not resolved"
+    # positional still works
+    r3 = tool("validate-finding.py", d, "--all")
+    assert d in (r3.stdout + r3.stderr), "positional dir broke"
+
+
+def test_scope_check_resolves_target_file(tmp_path):
+    """-iL/--target-file targets hidden in a file must be scope-checked (backlog #6)."""
+    eng = tmp_path / "eng"; eng.mkdir()
+    (eng / "engagement.json").write_text(
+        json.dumps({"in_scope": ["10.0.0.0/24"], "out_of_scope": []}))
+    env = {**os.environ, "OUTPUT_DIR": str(eng)}
+
+    oos = tmp_path / "oos.txt"; oos.write_text("10.0.0.5\n8.8.8.8  # sneaky OOS\n")
+    hook = json.dumps({"tool_name": "Bash",
+                       "tool_input": {"command": f"nmap -sT -iL {oos}"}})
+    r = run([PY, str(TOOLS / "scope-check.py")], stdin=hook, env=env)
+    assert r.returncode == 2, f"OOS host in -iL file should block; got {r.returncode}\n{r.stderr}"
+
+    ok = tmp_path / "ok.txt"; ok.write_text("10.0.0.5\n10.0.0.6\n")
+    hook2 = json.dumps({"tool_name": "Bash",
+                        "tool_input": {"command": f"nmap -sT -iL {ok}"}})
+    r2 = run([PY, str(TOOLS / "scope-check.py")], stdin=hook2, env=env)
+    assert r2.returncode == 0, f"in-scope-only -iL file should pass; got {r2.returncode}\n{r2.stderr}"
+
+
+def test_pathguard_selftest():
+    assert tool("pathguard.py").returncode == 0
+
+
+def test_engagement_runner_selftest():
+    # Exercises the tool gate (scope / allowlist / path containment) with no SDK/network.
+    assert tool("engagement-runner.py", "--selftest").returncode == 0
 
 
 def test_engagement_state_selftest():
@@ -113,9 +278,18 @@ def test_engagement_state_selftest():
 # ── 4. Credential reader (no .env required) ───────────────────────────────────
 
 def test_env_reader_unset_var():
-    r = tool("env-reader.py", "TZAR_SMOKE_UNSET_VAR")
+    # Allow-listed (via env override) but unset → NOT_SET, exit 0
+    env = {**os.environ, "TZAR_ENV_ALLOWLIST": "TZAR_SMOKE_UNSET_VAR"}
+    r = tool("env-reader.py", "TZAR_SMOKE_UNSET_VAR", env=env)
     assert r.returncode == 0
     assert "TZAR_SMOKE_UNSET_VAR=NOT_SET" in r.stdout
+
+
+def test_env_reader_denies_unlisted_var():
+    # Not on any allow-list → DENIED, value never read, exit 3 (prompt-injection guard)
+    r = tool("env-reader.py", "TZAR_SMOKE_SECRET_XYZ")
+    assert r.returncode == 3
+    assert "TZAR_SMOKE_SECRET_XYZ=DENIED" in r.stdout
 
 
 # ── 5. Prompt-injection scrubber ──────────────────────────────────────────────
@@ -164,6 +338,57 @@ def test_scope_check_blocks_out_of_scope(tmp_path):
                        input='{"tool_name":"Bash","tool_input":{"command":"nmap -sV evil.com"}}',
                        capture_output=True, text=True, cwd=REPO, env=env, timeout=TIMEOUT)
     assert r.returncode == 2                        # 2 = blocked
+
+
+# Shell-obfuscated out-of-scope commands that a naive prefix/token-0 check let
+# through — each MUST now be blocked by the shlex-based parser.
+_SCOPE_BYPASS_VECTORS = [
+    "cd /tmp && nmap evil.com",          # operator-chained after a safe prefix
+    "git status; nmap evil.com",         # statement separator
+    "X=1 nmap evil.com",                 # leading env-var assignment
+    'bash -c "nmap evil.com"',           # shell -c wrapper
+    "H=evil.com; nmap $H",               # variable resolution
+    "echo evil.com | xargs nmap",        # target piped into the scanner
+    "timeout 30 nmap evil.com",          # arg-consuming wrapper
+    "sudo nmap -sV evil.com",            # simple wrapper
+    "nohup nmap evil.com &",             # background + wrapper
+    "nmap $(echo evil.com)",             # command substitution
+]
+
+
+@pytest.mark.parametrize("cmd", _SCOPE_BYPASS_VECTORS)
+def test_scope_check_blocks_obfuscated_bypasses(tmp_path, cmd):
+    (tmp_path / "engagement.json").write_text(json.dumps(
+        {"in_scope": ["acme.com"], "out_of_scope": []}))
+    env = {**os.environ, "OUTPUT_DIR": str(tmp_path)}
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
+    r = subprocess.run([PY, str(TOOLS / "scope-check.py")], input=payload,
+                       capture_output=True, text=True, cwd=REPO, env=env, timeout=TIMEOUT)
+    assert r.returncode == 2, f"bypass NOT blocked: {cmd}"
+
+
+# In-scope / benign commands that MUST still be allowed (no false positives).
+_SCOPE_ALLOW_VECTORS = [
+    "nmap acme.com",
+    "cd /tmp && nmap acme.com",
+    "echo acme.com | xargs nmap",
+    "gobuster dir -u https://acme.com -w /usr/share/wl.txt",   # subcommand != host
+    "nmap acme.com 2> /tmp/out.txt",                            # redirect noise
+    "cat targets.txt | xargs nmap",                             # file contents unseen
+    "curl -s https://api.github.com/repos/x",                   # always-allowed infra
+    "git status",
+]
+
+
+@pytest.mark.parametrize("cmd", _SCOPE_ALLOW_VECTORS)
+def test_scope_check_allows_in_scope_and_benign(tmp_path, cmd):
+    (tmp_path / "engagement.json").write_text(json.dumps(
+        {"in_scope": ["acme.com"], "out_of_scope": []}))
+    env = {**os.environ, "OUTPUT_DIR": str(tmp_path)}
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
+    r = subprocess.run([PY, str(TOOLS / "scope-check.py")], input=payload,
+                       capture_output=True, text=True, cwd=REPO, env=env, timeout=TIMEOUT)
+    assert r.returncode == 0, f"false positive (blocked): {cmd}"
 
 
 # ── 9. Read-only memory tools (tolerate shared memory.db, no mutation) ─────────

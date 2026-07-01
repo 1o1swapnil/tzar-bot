@@ -32,9 +32,66 @@ import os
 import json
 import traceback
 from pathlib import Path
+from urllib.parse import urlparse
 
 TOOLS_DIR = Path(__file__).parent.resolve()
 REPO_DIR  = TOOLS_DIR.parent
+
+# Reuse the single code-enforced scope authority (same module the Bash
+# PreToolUse hook uses) so the browser is a first-class scope citizen.
+sys.path.insert(0, str(TOOLS_DIR))
+from scope import Scope, host_of  # noqa: E402
+from pathguard import safe_output_path  # noqa: E402  — contain writes to the engagement sandbox
+
+# Web-only: every other scheme (file:, chrome:, data:, ftp:, …) is a local
+# file-read / internal-resource vector and is never a legitimate target here.
+_ALLOWED_SCHEMES = {"http", "https", "about"}
+
+# Cloud-metadata endpoints — never a legitimate browser target unless the
+# engagement explicitly scopes them in.
+_METADATA_HOSTS = {
+    "169.254.169.254", "fd00:ec2::254",          # AWS / GCP / Azure IMDS
+    "100.100.200.200",                            # Alibaba
+    "metadata", "metadata.google.internal",       # GCP by name
+}
+
+
+def _load_scope() -> Scope:
+    """Load engagement scope from $OUTPUT_DIR/engagement.json (same as the hook)."""
+    output_dir = os.environ.get("OUTPUT_DIR", "")
+    if output_dir:
+        meta = Path(output_dir) / "engagement.json"
+        if meta.exists():
+            try:
+                return Scope.load(meta)
+            except Exception:
+                pass
+    return Scope()
+
+
+def _guard_url(url: str):
+    """Return None if the browser may visit `url`, else a human-readable reason.
+
+    Deny-wins / default-deny, delegated to scope.py — identical semantics to the
+    Bash scope-check hook, which does NOT see MCP calls. Hard blocks (non-web
+    schemes, cloud-metadata IPs) apply even when no engagement scope is active.
+    """
+    if not url or not url.strip():
+        return "empty URL"
+    parsed = urlparse(url if "://" in url else "//" + url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme and scheme not in _ALLOWED_SCHEMES:
+        return f"non-web scheme '{scheme}:' is blocked (only http/https allowed)"
+    host = host_of(url)
+    if not host:
+        return "could not parse host from URL"
+    scope = _load_scope()
+    if host in _METADATA_HOSTS and not scope.in_scope_host(url):
+        return f"{host} is a cloud-metadata endpoint — blocked"
+    if scope.active:
+        return scope.reject_reason(url)   # None when in scope
+    return None
+
 
 # ── Browser state (lives for the lifetime of the server process) ──────────────
 _playwright = None
@@ -93,9 +150,14 @@ def tool_browser_launch(args: dict) -> tuple[str, bool]:
         pass
     _playwright = _browser = _context = _page = None
 
+    url = args.get("url", "")
+    if url:
+        reason = _guard_url(url)
+        if reason:
+            return f"BLOCKED (scope): {reason}", True
+
     headless = args.get("headless", True)
     _ensure_browser(headless=headless)
-    url = args.get("url", "")
     if url:
         _page.goto(url, wait_until="domcontentloaded", timeout=30000)
         return f"Browser launched. Navigated to: {_page.url}\nTitle: {_page.title()}", False
@@ -103,8 +165,11 @@ def tool_browser_launch(args: dict) -> tuple[str, bool]:
 
 
 def tool_browser_navigate(args: dict) -> tuple[str, bool]:
-    _ensure_browser()
     url      = args["url"]
+    reason = _guard_url(url)
+    if reason:
+        return f"BLOCKED (scope): {reason}", True
+    _ensure_browser()
     wait_for = args.get("wait_for", "domcontentloaded")
     _page.goto(url, wait_until=wait_for, timeout=30000)
     return f"Navigated to: {_page.url}\nTitle: {_page.title()}", False
@@ -142,16 +207,15 @@ def tool_browser_type(args: dict) -> tuple[str, bool]:
 def tool_browser_screenshot(args: dict) -> tuple[str, bool]:
     _ensure_browser()
     name       = args.get("name", "screenshot")
-    output_dir = args.get("output_dir", "")
+    output_dir = args.get("output_dir") or str(REPO_DIR)
     full_page  = args.get("full_page", False)
 
-    if output_dir:
-        save_dir = Path(output_dir) / "screenshots"
-    else:
-        save_dir = REPO_DIR / "screenshots"
-    save_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        path = safe_output_path(output_dir, "screenshots", f"{name}.png")
+    except ValueError as e:
+        return f"BLOCKED (path): {e}", True
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-    path = save_dir / f"{name}.png"
     _page.screenshot(path=str(path), full_page=full_page)
     return f"Screenshot saved: {path}\nURL: {_page.url}", False
 
@@ -221,8 +285,12 @@ def tool_browser_export_session(args: dict) -> tuple[str, bool]:
     }""")
 
     output_dir = args.get("output_dir", "")
+    saved_msg = ""
     if output_dir:
-        session_file = Path(output_dir) / "artifacts" / "browser-session.json"
+        try:
+            session_file = safe_output_path(output_dir, "artifacts", "browser-session.json")
+        except ValueError as e:
+            return f"BLOCKED (path): {e}", True
         session_file.parent.mkdir(parents=True, exist_ok=True)
         session_file.write_text(json.dumps({
             "cookies": cookies,
@@ -230,8 +298,6 @@ def tool_browser_export_session(args: dict) -> tuple[str, bool]:
             "session_storage": session_storage,
         }, indent=2))
         saved_msg = f"\nSaved to: {session_file}"
-    else:
-        saved_msg = ""
 
     result = {
         "curl_cookie_header": f"-H 'Cookie: {curl_cookie}'",
@@ -254,11 +320,15 @@ def tool_browser_export_har(args: dict) -> tuple[str, bool]:
     name       = args.get("name", "capture")
     url        = args.get("url", _page.url)
 
-    if output_dir:
-        har_path = Path(output_dir) / "artifacts" / f"{name}.har"
-        har_path.parent.mkdir(parents=True, exist_ok=True)
-    else:
-        har_path = REPO_DIR / f"{name}.har"
+    reason = _guard_url(url)
+    if reason:
+        return f"BLOCKED (scope): {reason}", True
+
+    try:
+        har_path = safe_output_path(output_dir or str(REPO_DIR), "artifacts", f"{name}.har")
+    except ValueError as e:
+        return f"BLOCKED (path): {e}", True
+    har_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Open a new page with HAR recording
     har_page = _context.new_page()
@@ -453,26 +523,27 @@ HANDLERS = {
 # ── MCP stdio framing ─────────────────────────────────────────────────────────
 
 def read_message():
-    headers = {}
+    """Read one newline-delimited JSON-RPC message from stdin (MCP stdio transport)."""
     while True:
         raw = sys.stdin.buffer.readline()
         if not raw:
             return None
-        line = raw.rstrip(b"\r\n")
+        line = raw.strip()
         if not line:
-            break
-        if b":" in line:
-            k, _, v = line.partition(b":")
-            headers[k.strip().lower()] = v.strip()
-    length = int(headers.get(b"content-length", 0))
-    if not length:
-        return None
-    return json.loads(sys.stdin.buffer.read(length).decode("utf-8"))
+            continue  # skip blank lines between messages
+        try:
+            return json.loads(line.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # A malformed line must not crash the server — skip and keep serving.
+            sys.stderr.write("[playwright-mcp] skipping malformed JSON-RPC line\n")
+            sys.stderr.flush()
+            continue
 
 
 def send_message(obj):
+    """Write one newline-delimited JSON-RPC message to stdout (MCP stdio transport)."""
     body = json.dumps(obj).encode("utf-8")
-    sys.stdout.buffer.write(f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+    sys.stdout.buffer.write(body + b"\n")
     sys.stdout.buffer.flush()
 
 

@@ -429,13 +429,24 @@ def main():
     args   = sys.argv[1:]
     strict = "--strict" in args
     run_all = "--all" in args
-    paths  = [a for a in args if not a.startswith("--")]
+    # Extract --output-dir VALUE / --output-dir=VALUE (alternative to the positional dir).
+    od_flag, cleaned, i = "", [], 0
+    while i < len(args):
+        a = args[i]
+        if a == "--output-dir" and i + 1 < len(args):
+            od_flag = args[i + 1]; i += 2; continue
+        if a.startswith("--output-dir="):
+            od_flag = a.split("=", 1)[1]; i += 1; continue
+        cleaned.append(a); i += 1
+    paths = [a for a in cleaned if not a.startswith("--")]
 
-    if not paths:
+    # Resolve target: --output-dir flag → positional → $OUTPUT_DIR env.
+    target_str = od_flag or (paths[0] if paths else "") or os.environ.get("OUTPUT_DIR", "")
+    if not target_str:
         print(__doc__)
         sys.exit(2)
 
-    target = Path(paths[0]).resolve()
+    target = Path(target_str).resolve()
 
     if run_all:
         # Validate every finding under OUTPUT_DIR/findings/

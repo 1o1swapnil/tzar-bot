@@ -86,6 +86,63 @@ Use python3 tools/env-reader.py for any credentials.""",
 
 Spawn parallel agents in a **single message** for phases that allow parallel execution.
 
+**Long-running tools (>10 min) — don't let them die to a timeout.** Background `Agent` executors run
+their tool through the Bash tool, which is killed at its timeout (~2 min default, 10 min max). For
+full port sweeps, brute force, or any multi-minute tool, instruct the executor to launch it detached
+and poll, instead of running it inline:
+
+```bash
+python3 tools/long-run.py start --log "$OUTPUT_DIR/recon/nmap-full.log" -- nmap -p- -sS TARGET
+python3 tools/long-run.py status --log "$OUTPUT_DIR/recon/nmap-full.log" --tail 20   # later turns
+```
+
+For the inline coordinator's own bookkeeping you may also use the harness `run_in_background`; for
+delegated executors and the autonomous runner, prefer `long-run.py` (it streams incremental output
+and records the exit code, so nothing is lost if a poll turn is interrupted).
+
+### Executor lifecycle (register → stop → reap)
+
+Track spawned executor/scan processes so "stand down" is a real terminate, not a polite request,
+and so a stray re-run can't corrupt another agent's output:
+
+```bash
+# when you spawn a detached scan, register its PID + the dir it owns
+python3 tools/agent-supervisor.py register --output-dir "$OUTPUT_DIR" \
+    --name scan-A --pid <PID> --owns recon/batch-A
+python3 tools/agent-supervisor.py list --output-dir "$OUTPUT_DIR"
+
+# stand-down = hard stop (SIGTERM → SIGKILL), not just a message
+python3 tools/agent-supervisor.py stop --output-dir "$OUTPUT_DIR" --all
+# then clean any orphan still touching this engagement — DRY-RUN FIRST
+python3 tools/agent-supervisor.py reap --output-dir "$OUTPUT_DIR" --dry-run
+python3 tools/agent-supervisor.py reap --output-dir "$OUTPUT_DIR"
+```
+
+> **`reap` safety:** it SIGTERM→SIGKILLs every unregistered process whose cmdline matches the
+> pattern (default = OUTPUT_DIR). It excludes this process and any tzar-bot tool (under `tools/`),
+> but a broad pattern can still catch unintended processes. **Always `--dry-run` first** and prefer a
+> narrow `--pattern` (e.g. the scan-script name) over the default.
+
+`register --owns` flags an ownership collision if two running agents claim the same output dir.
+Combine with idempotent, per-agent output dirs (skip-if-exists) so a rogue re-run cannot overwrite
+another agent's results.
+
+### Concurrency — don't trip a resource kill
+
+5 batches × 1200 worker threads (~6000 sockets) once triggered an external `exit 144` kill. Size
+parallelism from the shared helper, not by guessing:
+
+```bash
+python3 tools/concurrency.py recommend --workers 1200 --items 30   # caps workers + fan-out
+```
+
+- **Per-process workers** default to ≤400 (hard cap 512). Scan scripts should read `$TZAR_WORKERS`
+  (e.g. `workers = int(os.environ.get("TZAR_WORKERS", "400"))`, or import `concurrency.safe_workers()`).
+- **Parallel executor fan-out** ≤ `cpu-2`. Prefer fewer, larger batches over many tiny ones.
+- **Auto-recover** from a resource kill: launch scans via `long-run.py start --workers 400
+  --retry-on-kill 3 -- <scan>` — on a signal/resource kill it retries, halving `$TZAR_WORKERS`
+  each time (400 → 200 → 100), so a too-hot scan self-corrects instead of dying.
+
 ## Spawning Validators
 
 After all phase executors complete, for each finding in OUTPUT_DIR/findings/:

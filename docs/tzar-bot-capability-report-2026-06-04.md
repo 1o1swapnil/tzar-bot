@@ -1,5 +1,9 @@
 # Tzar-Bot — Capability & Market Readiness Report
 
+> ⚠️ **SUPERSEDED (numbers stale).** Headline counts here (30 skills / 10 tools / 9 MCP) are from
+> 2026-06-04. See **`tzar-bot-capability-report-2026-06-26.md`** for current figures
+> (69 skills / 36 tools / 18 MCP / 119 tests). The per-domain capability tables below remain valid.
+
 | | |
 |---|---|
 | **Date** | 2026-06-04 |

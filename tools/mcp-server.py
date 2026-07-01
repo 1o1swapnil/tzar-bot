@@ -3,7 +3,7 @@
 tzar-bot MCP server — exposes tools/ as MCP tools for Claude Code, Cursor,
 and any MCP-compatible client.
 
-Transport: stdio (Content-Length-framed JSON-RPC 2.0, same as LSP)
+Transport: stdio (newline-delimited JSON-RPC 2.0, per the MCP stdio spec)
 
 Start manually:
     python3 tools/mcp-server.py
@@ -13,6 +13,7 @@ Registered automatically via .claude/settings.json mcpServers block.
 
 import sys
 import os
+import re
 import json
 import subprocess
 from pathlib import Path
@@ -21,40 +22,53 @@ TOOLS_DIR = Path(__file__).parent.resolve()
 REPO_DIR  = TOOLS_DIR.parent
 PYTHON    = sys.executable
 
+sys.path.insert(0, str(TOOLS_DIR))
+from pathguard import within_allowed_roots  # noqa: E402  — contain caller-supplied output paths
+
+# Reject anything that is not a well-formed CVE id before it reaches a child
+# script as an argument (also neutralises option-injection via leading '-').
+_CVE_RE = re.compile(r"^CVE-\d{4}-\d{3,}$", re.IGNORECASE)
+
 
 # ── stdio framing ────────────────────────────────────────────────────────────
 
 def read_message():
-    """Read one Content-Length-framed JSON-RPC message from stdin."""
-    headers = {}
+    """Read one newline-delimited JSON-RPC message from stdin (MCP stdio transport)."""
     while True:
         raw = sys.stdin.buffer.readline()
         if not raw:
             return None
-        line = raw.rstrip(b"\r\n")
+        line = raw.strip()
         if not line:
-            break
-        if b":" in line:
-            k, _, v = line.partition(b":")
-            headers[k.strip().lower()] = v.strip()
-    length = int(headers.get(b"content-length", 0))
-    if not length:
-        return None
-    return json.loads(sys.stdin.buffer.read(length).decode("utf-8"))
+            continue  # skip blank lines between messages
+        try:
+            return json.loads(line.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # A malformed line must not crash the server — skip and keep serving.
+            sys.stderr.write("[mcp] skipping malformed JSON-RPC line\n")
+            sys.stderr.flush()
+            continue
 
 
 def send_message(obj):
-    """Write one Content-Length-framed JSON-RPC message to stdout."""
+    """Write one newline-delimited JSON-RPC message to stdout (MCP stdio transport)."""
     body = json.dumps(obj).encode("utf-8")
-    sys.stdout.buffer.write(f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+    sys.stdout.buffer.write(body + b"\n")
     sys.stdout.buffer.flush()
 
 
 # ── subprocess helper ────────────────────────────────────────────────────────
 
-def run(cmd):
-    r = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_DIR)
-    return r.stdout, r.stderr, r.returncode
+TOOL_TIMEOUT = 120  # seconds — a hung child must never freeze the single-threaded server
+
+
+def run(cmd, stdin=None, env=None, timeout=TOOL_TIMEOUT):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_DIR,
+                           input=stdin, env=env, timeout=timeout)
+        return r.stdout, r.stderr, r.returncode
+    except subprocess.TimeoutExpired:
+        return "", f"tool timed out after {timeout}s", 124
 
 
 # ── tool schemas ─────────────────────────────────────────────────────────────
@@ -73,6 +87,50 @@ TOOL_DEFS = [
                 "api_key": {"type": "string", "description": "Optional NVD API key (overrides .env)"},
             },
             "required": ["cve_id"],
+        },
+    },
+    {
+        "name": "mitre_lookup",
+        "description": (
+            "Look up / search / map MITRE ATT&CK techniques across the Enterprise, "
+            "Mobile and ICS (OT) matrices from a local offline index. Use 'map' to get "
+            "candidate technique IDs for a finding description, 'lookup' for a technique "
+            "by ID (Txxxx[.yyy]), 'search' for keywords, 'tactic' to list a tactic's "
+            "techniques, 'stats' for index coverage."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["lookup", "search", "map", "tactic", "tactics", "stats"],
+                           "description": "Operation to run"},
+                "query":  {"type": "string", "description": "Technique ID (lookup), keywords (search), finding text (map), or tactic name (tactic)"},
+                "matrix": {"type": "string", "enum": ["all", "enterprise", "mobile", "ics"], "default": "all"},
+                "limit":  {"type": "integer", "description": "Max results for search/map", "default": 8},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "atomic_red",
+        "description": (
+            "Look up Red Canary Atomic Red Team detection-validation tests, keyed by MITRE "
+            "ATT&CK technique, from a local offline index. action 'lookup' lists tests for a "
+            "technique ID, 'search' finds tests by keyword, 'show' returns one test's full "
+            "command+cleanup, 'map' maps a finding description to techniques then to "
+            "atomic tests, 'stats' shows coverage. READ-ONLY: returns test definitions/commands; "
+            "it never executes them (run atomics only in an authorized lab via Invoke-AtomicRedTeam)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action":   {"type": "string", "enum": ["lookup", "search", "show", "map", "stats"]},
+                "query":    {"type": "string", "description": "Technique ID (lookup/show), keywords (search), or finding text (map)"},
+                "platform": {"type": "string", "enum": ["windows", "linux", "macos"], "description": "Optional platform filter"},
+                "test":     {"type": "integer", "description": "show: 1-based test number"},
+                "guid":     {"type": "string", "description": "show: select test by GUID"},
+                "limit":    {"type": "integer", "default": 20},
+            },
+            "required": ["action"],
         },
     },
     {
@@ -442,25 +500,78 @@ TOOL_DEFS = [
 # ── tool handlers ─────────────────────────────────────────────────────────────
 
 def tool_nvd_lookup(args):
-    cmd = [PYTHON, str(TOOLS_DIR / "nvd-lookup.py"), args["cve_id"]]
+    cve = args["cve_id"]
+    if not _CVE_RE.match(cve or ""):
+        return f"Invalid CVE id: {cve!r} (expected CVE-YYYY-NNNN…)", True
+    cmd = [PYTHON, str(TOOLS_DIR / "nvd-lookup.py")]
     if args.get("api_key"):
         cmd += ["--api-key", args["api_key"]]
+    cmd += ["--", cve]   # end-of-options: a leading-dash value can't become a flag
+    out, err, rc = run(cmd)
+    return (out + (f"\n{err}" if err and rc != 0 else "")).strip(), rc != 0
+
+
+def tool_mitre_lookup(args):
+    action = args.get("action")
+    if action not in {"lookup", "search", "map", "tactic", "tactics", "stats"}:
+        return f"Invalid action: {action!r}", True
+    cmd = [PYTHON, str(TOOLS_DIR / "mitre-lookup.py"), action]
+    needs_query = action in {"lookup", "search", "map", "tactic"}
+    if needs_query:
+        q = (args.get("query") or "").strip()
+        if not q:
+            return f"action '{action}' requires 'query'", True
+    if action in {"search", "map"} and args.get("limit"):
+        cmd += ["--limit", str(int(args["limit"]))]
+    if args.get("matrix"):
+        cmd += ["--matrix", args["matrix"]]
+    if action != "update":
+        cmd.append("--json")
+    if needs_query:
+        cmd += ["--", q]
+    out, err, rc = run(cmd)
+    return (out + (f"\n{err}" if err and rc != 0 else "")).strip(), rc != 0
+
+
+def tool_atomic_red(args):
+    action = args.get("action")
+    if action not in {"lookup", "search", "show", "map", "stats"}:
+        return f"Invalid action: {action!r}", True
+    cmd = [PYTHON, str(TOOLS_DIR / "atomic-red.py"), action]
+    needs_query = action in {"lookup", "search", "show", "map"}
+    q = (args.get("query") or "").strip()
+    if needs_query and not q:
+        return f"action '{action}' requires 'query'", True
+    if args.get("platform") and action != "stats":
+        cmd += ["--platform", args["platform"]]
+    if action in {"search", "map"} and args.get("limit"):
+        cmd += ["--limit", str(int(args["limit"]))]
+    if action == "show":
+        if args.get("guid"):
+            cmd += ["--guid", str(args["guid"])]
+        elif args.get("test"):
+            cmd += ["--test", str(int(args["test"]))]
+    cmd.append("--json")
+    if needs_query:
+        cmd += ["--", q]
     out, err, rc = run(cmd)
     return (out + (f"\n{err}" if err and rc != 0 else "")).strip(), rc != 0
 
 
 def tool_validate_finding(args):
-    cmd = [PYTHON, str(TOOLS_DIR / "validate-finding.py"), args["finding_dir"]]
+    cmd = [PYTHON, str(TOOLS_DIR / "validate-finding.py")]
     if args.get("strict"):
         cmd.append("--strict")
+    cmd += ["--", args["finding_dir"]]
     out, err, rc = run(cmd)
     return (out + (f"\n{err}" if err else "")).strip(), rc == 2
 
 
 def tool_validate_all(args):
-    cmd = [PYTHON, str(TOOLS_DIR / "validate-finding.py"), args["output_dir"], "--all"]
+    cmd = [PYTHON, str(TOOLS_DIR / "validate-finding.py"), "--all"]
     if args.get("strict"):
         cmd.append("--strict")
+    cmd += ["--", args["output_dir"]]
     out, err, rc = run(cmd)
     return (out + (f"\n{err}" if err else "")).strip(), rc == 2
 
@@ -490,8 +601,14 @@ def tool_scrub_web_content(args):
 
 
 def tool_gen_nuclei_template(args):
+    cve = args["cve_id"]
+    if not _CVE_RE.match(cve or ""):
+        return f"Invalid CVE id: {cve!r} (expected CVE-YYYY-NNNN…)", True
+    out_path = args.get("output_path")
+    if out_path and not within_allowed_roots(out_path):
+        return f"BLOCKED (path): output_path {out_path!r} is outside the engagement sandbox", True
     cmd = [PYTHON, str(TOOLS_DIR / "gen-nuclei-template.py"),
-           "--cve", args["cve_id"],
+           "--cve", cve,
            "--description", args.get("description", ""),
            "--path", args.get("path", "/")]
     for flag, key in [("--severity","severity"), ("--method","method"),
@@ -518,27 +635,24 @@ def tool_read_env(args):
 
 
 def tool_scope_check(args):
-    import subprocess as _sp
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": args["command"]}})
     env = dict(os.environ)
     if args.get("output_dir"):
         env["OUTPUT_DIR"] = args["output_dir"]
-    r = _sp.run(
-        [PYTHON, str(TOOLS_DIR / "scope-check.py")],
-        input=payload, capture_output=True, text=True, env=env
-    )
-    if r.returncode == 2:
-        return f"BLOCKED: {r.stderr.strip()}", True  # is_error=True signals the command was rejected
+    out, err, rc = run([PYTHON, str(TOOLS_DIR / "scope-check.py")], stdin=payload, env=env)
+    if rc == 2:
+        return f"BLOCKED: {err.strip()}", True  # is_error=True signals the command was rejected
     return "ALLOWED", False
 
 
 def tool_memory_search(args):
-    cmd = [PYTHON, str(TOOLS_DIR / "memory-search.py"), args["query"]]
+    cmd = [PYTHON, str(TOOLS_DIR / "memory-search.py")]
     if args.get("type"):     cmd += ["--type",     args["type"]]
     if args.get("severity"): cmd += ["--severity", args["severity"]]
     if args.get("limit"):    cmd += ["--limit",     str(args["limit"])]
     if args.get("rebuild"):  cmd.append("--index")
     cmd.append("--json")
+    cmd += ["--", args["query"]]
     out, err, rc = run(cmd)
     return (out + (f"\n{err}" if err and rc != 0 else "")).strip(), rc != 0
 
@@ -617,20 +731,17 @@ def tool_token_meter(args):
         else:
             cmd.append(args.get("source", "-"))
     # list / pricing take no extra args
-    if stdin_input is not None:
-        r = subprocess.run(cmd, input=stdin_input, capture_output=True, text=True, cwd=REPO_DIR)
-        out, err, rc = r.stdout, r.stderr, r.returncode
-    else:
-        out, err, rc = run(cmd)
+    out, err, rc = run(cmd, stdin=stdin_input)
     return (out + (f"\n{err}" if err and rc != 0 else "")).strip(), rc != 0
 
 
 def tool_report_export(args):
-    cmd = [PYTHON, str(TOOLS_DIR / "report-export.py"), args["output_dir"]]
+    cmd = [PYTHON, str(TOOLS_DIR / "report-export.py")]
     if args.get("format"):  cmd += ["--format",  args["format"]]
     if args.get("client"):  cmd += ["--client",  args["client"]]
     if args.get("target"):  cmd += ["--target",  args["target"]]
     if args.get("out_dir"): cmd += ["--out-dir", args["out_dir"]]
+    cmd += ["--", args["output_dir"]]
     out, err, rc = run(cmd)
     return (out + (f"\n{err}" if err and rc != 0 else "")).strip(), rc != 0
 
@@ -684,6 +795,8 @@ def tool_engagement_state(args):
 
 HANDLERS = {
     "nvd_lookup":            tool_nvd_lookup,
+    "mitre_lookup":          tool_mitre_lookup,
+    "atomic_red":            tool_atomic_red,
     "validate_finding":      tool_validate_finding,
     "validate_all_findings": tool_validate_all,
     "init_engagement":       tool_init_engagement,

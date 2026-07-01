@@ -2,7 +2,7 @@
 
 AI-powered pentesting bot running on Claude Code + Kali Linux. Autonomous multi-agent system with coordinator, executor, and validator agents.
 
-> ⚠️ **Authorized use only.** Tzar-Bot is for security testing you are *explicitly authorized* to perform — pentests, vulnerability assessments, CTFs, and bug-bounty programs within their declared scope. All activity is designed to be non-destructive. You are solely responsible for ensuring you have permission to test any target. Scope is enforced in code (`tools/scope.py` + the `scope-check.py` PreToolUse hook) — out-of-scope commands are blocked before they run.
+> ⚠️ **Authorized use only.** Tzar-Bot is for security testing you are *explicitly authorized* to perform — pentests, vulnerability assessments, CTFs, and bug-bounty programs within their declared scope. All activity is designed to be non-destructive. You are solely responsible for ensuring you have permission to test any target. Scope is enforced in code (`tools/scope.py` + the `scope-check.py` PreToolUse hook): the hook parses each Bash command shell-aware — splitting on operators/pipes, stripping wrappers (`sudo`, `env`, `timeout`, `xargs`, `bash -c`), resolving `$VAR`, and checking every stage — so out-of-scope targets are blocked before the command runs. Treat this as defense-in-depth, not an absolute boundary: it catches direct and shell-obfuscated invocations, but it cannot read targets hidden inside files (`-iL targets.txt`) and is not a substitute for network-level egress controls. Stay within your authorized scope regardless.
 
 ## Requirements
 
@@ -119,7 +119,7 @@ Python utilities the agents drive (stdlib-first; 15 are also exposed model-agnos
 |------|---------|
 | `init-engagement.py` | Create the typed engagement tree + export `$OUTPUT_DIR` |
 | `engagement-state.py` | Resumable, scope-guarded ledger; **executor work-claim dedup** (`claim`/`release`/`worklist --agent`) |
-| `scope.py` · `scope-check.py` | Code-enforced scope (deny-wins); PreToolUse block hook (allow-list extensible via `config/safe-prefixes.txt`) |
+| `scope.py` · `scope-check.py` | Code-enforced scope (deny-wins); shell-aware PreToolUse block hook — tokenizes commands, splits on operators/pipes, unwraps `sudo`/`env`/`timeout`/`xargs`/`bash -c`, resolves `$VAR` (allow-list extensible via `config/safe-prefixes.txt`) |
 | `validate-finding.py` | 5-check mechanical finding-validation gate |
 | `generate-report.py` | Canonical tzar-bot-style **PDF** report |
 | `report-export.py` | **NEW** — offline **JSON + HTML** report export (no reportlab, no network) |
@@ -132,7 +132,7 @@ Python utilities the agents drive (stdlib-first; 15 are also exposed model-agnos
 | `lint-skills.py` · `sync-bughunter.py` | Skill quality gate; upstream-drift detection |
 | `mcp-server.py` · `playwright-mcp-server.py` | MCP servers (15 tools; authenticated browser automation) |
 
-Smoke tests (65, hermetic): `tools/.venv-test/bin/python -m pytest tools/tests/ -q`. Full command reference: `docs/operations.md`.
+Smoke tests (84, hermetic — includes shell-obfuscation scope-bypass regression vectors): `tools/.venv-test/bin/python -m pytest tools/tests/ -q`. Full command reference: `docs/operations.md`.
 
 ## Required Tools (Kali)
 

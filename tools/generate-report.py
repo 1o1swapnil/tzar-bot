@@ -241,6 +241,13 @@ def parse_finding_md(path):
                 re.search(r'CVSS:3\.1/\S+', text).group(0) or "")
     cwe  = (_table_field(text, "CWE") or _field(text, "CWE") or "")
     owasp = (_table_field(text, "OWASP") or _field(text, "OWASP") or "")
+    mitre_field = (_table_field(text, "MITRE ATT&CK", "MITRE ATT&amp;CK", "MITRE") or
+                   _field(text, "MITRE ATT&CK", "MITRE") or "")
+    # Explicit technique IDs: prefer the MITRE field; else scan the whole finding.
+    mitre_ids = re.findall(r'\bT\d{4}(?:\.\d{3})?\b', mitre_field) or \
+                re.findall(r'\bT\d{4}(?:\.\d{3})?\b', text)
+    # de-dupe preserving order
+    seen = set(); mitre_ids = [t for t in mitre_ids if not (t in seen or seen.add(t))]
     affected = (_table_field(text, "Affected Component", "Affected URL", "Affected") or
                 _field(text, "Affected Component", "Affected URL", "File") or "")
 
@@ -273,6 +280,8 @@ def parse_finding_md(path):
         "business_impact":  impact,
         "remediation":      remed,
         "evidence_text":    evid,
+        "mitre_field":      mitre_field,
+        "mitre_ids":        mitre_ids,
     }
 
 
@@ -664,6 +673,115 @@ def build_remediation_roadmap(findings):
     return story
 
 
+def build_recommendations(output_dir):
+    """Render OUTPUT_DIR/recommendations.md as a 'Recommendations & Follow-up'
+    section if the file exists. Lightweight markdown: '## ' -> h2, '- '/'* ' ->
+    bullet, '### ' -> h2, other non-empty lines -> body. Returns [] if no file."""
+    rec_path = Path(output_dir) / "recommendations.md"
+    if not rec_path.exists():
+        return []
+    raw = rec_path.read_text(encoding="utf-8", errors="replace")
+    def clean(s):  # strip md emphasis/code markers (p() escapes HTML anyway)
+        return s.replace("**", "").replace("`", "").strip()
+    story = [p("Recommendations & Follow-up", "h1"), hr()]
+    for line in raw.splitlines():
+        s = line.strip()
+        if not s:
+            story.append(sp(2)); continue
+        if s.startswith("# "):          # top title — already have the h1
+            continue
+        elif s.startswith("### "):
+            story.append(p(clean(s[4:]), "h2"))
+        elif s.startswith("## "):
+            story.append(p(clean(s[3:]), "h2"))
+        elif s.startswith(("- ", "* ")):
+            story.append(p("• " + clean(s[2:]), "bullet"))
+        elif re.match(r"^\d+\.\s", s):
+            story.append(p("• " + clean(re.sub(r"^\d+\.\s", "", s)), "bullet"))
+        else:
+            story.append(p(clean(s), "body"))
+    story.append(PageBreak())
+    return story
+
+
+def _mitre_lookup(args_list):
+    """Call tools/mitre-lookup.py with --json; return parsed list or None on any failure."""
+    tool = Path(__file__).resolve().parent / "mitre-lookup.py"
+    if not tool.exists():
+        return None
+    try:
+        r = subprocess.run([sys.executable, str(tool), *args_list, "--json"],
+                           capture_output=True, text=True, timeout=30)
+        if r.returncode != 0 or not r.stdout.strip():
+            return None
+        return json.loads(r.stdout)
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError, ValueError):
+        return None
+
+
+def build_mitre_appendix(findings):
+    """Auto-generate a MITRE ATT&CK appendix from each finding's explicit technique IDs
+    (verified via mitre-lookup), falling back to keyword 'map' suggestions when a finding
+    declares none. Skips silently if the local ATT&CK index is absent."""
+    data_dir = Path(__file__).resolve().parent.parent / "data" / "mitre"
+    if not (data_dir / "enterprise.json").exists():
+        return []  # no local index — nothing to add, don't break the report
+
+    rows = [[Paragraph(f"<b>{h}</b>", ST["body"]) for h in
+             ("Finding", "Technique", "Name", "Tactic(s)", "Matrix", "Basis")]]
+    has_suggested = False
+    any_rows = False
+    for f in findings:
+        mapped = []
+        for tid in f.get("mitre_ids", []):
+            res = _mitre_lookup(["lookup", tid])
+            if res:
+                t = res[0]
+                mapped.append((tid, t["name"], ", ".join(t["tactics"]) or "-", t["matrix"], "Verified"))
+        if not mapped:
+            text = (f["title"] + ". " + (f.get("business_impact") or f.get("description") or ""))[:400]
+            res = _mitre_lookup(["map", text, "--limit", "3"])
+            for r in (res or []):
+                mapped.append((r["id"], r["name"], ", ".join(r["tactics"]) or "-", r["matrix"], "Suggested"))
+                has_suggested = True
+        for tid, name, tactics, matrix, basis in mapped:
+            rows.append([Paragraph(f["id"], ST["body_muted"]),
+                         Paragraph(_escape(tid), ST["body"]),
+                         Paragraph(_escape(name), ST["body"]),
+                         Paragraph(_escape(tactics), ST["body_muted"]),
+                         Paragraph(_escape(matrix), ST["body_muted"]),
+                         Paragraph(basis, ST["body_muted"])])
+            any_rows = True
+    if not any_rows:
+        return []
+
+    story = [p("Appendix: MITRE ATT&CK Mapping", "h1"), hr()]
+    story.append(p("Techniques are drawn from the local MITRE ATT&CK index (Enterprise, Mobile, "
+                   "ICS/OT). “Verified” rows correspond to technique IDs explicitly cited "
+                   "in the finding; “Suggested” rows are keyword-matched candidates that "
+                   "should be confirmed before client delivery.", "body_muted"))
+    sp(2)
+    t = Table(rows, colWidths=[40, 58, 116, 92, 66, 62])
+    t.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, 0), C["surface"]),
+        ("TEXTCOLOR",     (0, 0), (-1, 0), C["accent"]),
+        ("GRID",          (0, 0), (-1, -1), 0.4, C["border"]),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [C["bg"], C["surface"]]),
+        ("TOPPADDING",    (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 5),
+        ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+    ]))
+    story.append(t)
+    if has_suggested:
+        story.append(sp(2))
+        story.append(p("Note: “Suggested” techniques are heuristic keyword matches "
+                       "(mitre-lookup map) — verify with the ATT&CK technique definition before "
+                       "asserting them in a final client report.", "body_muted"))
+    story.append(PageBreak())
+    return story
+
+
 def build_methodology():
     story = [p("Methodology", "h1"), hr()]
     story.append(p("Assessment Phases", "h2"))
@@ -955,8 +1073,11 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("output_dir",
-                    help="Engagement OUTPUT_DIR (or path to pentest-report.json)")
+    ap.add_argument("output_dir", nargs="?",
+                    help="Engagement OUTPUT_DIR (or path to pentest-report.json). "
+                         "May also be given as --output-dir or via $OUTPUT_DIR.")
+    ap.add_argument("--output-dir", dest="output_dir_opt", default="",
+                    help="Engagement OUTPUT_DIR (alternative to the positional form)")
     ap.add_argument("reports_dir", nargs="?",
                     help="Override reports output directory")
     ap.add_argument("--client",  default="", help="Client name")
@@ -971,7 +1092,11 @@ def main():
                     ))
     args = ap.parse_args()
 
-    output_dir = Path(args.output_dir).resolve()
+    # Resolve engagement dir: --output-dir flag → positional → $OUTPUT_DIR env.
+    _od = args.output_dir_opt or args.output_dir or os.environ.get("OUTPUT_DIR", "")
+    if not _od:
+        ap.error("engagement dir required: pass it positionally, with --output-dir, or set $OUTPUT_DIR")
+    output_dir = Path(_od).resolve()
 
     # Legacy JSON mode: python3 generate-report.py findings.json reports/
     if output_dir.suffix == ".json":
@@ -1029,6 +1154,8 @@ def main():
 
     story.append(PageBreak())
     story += build_remediation_roadmap(findings)
+    story += build_recommendations(output_dir)
+    story += build_mitre_appendix(findings)
     story += build_methodology()
     story += build_appendix(findings, output_dir)
 

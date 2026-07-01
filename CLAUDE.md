@@ -73,13 +73,14 @@ Skills live in `skills/` — each a `SKILL.md` plus a `reference/` folder. **Two
 | **Web vuln-class depth** | `hunt-saml`, `hunt-nosqli`, `hunt-ldap`, `hunt-deserialization`, `hunt-http-smuggling`, `hunt-host-header`, `hunt-cache-poison`, `hunt-open-redirect`, `hunt-websocket`, `hunt-grpc` |
 | **Framework-specific** | `hunt-aspnet`, `hunt-laravel`, `hunt-nextjs`, `hunt-nodejs`, `hunt-springboot` |
 | **Infrastructure** | `infrastructure`, `system`, `cloud-containers`, `cloud-iam-deep`, `hunt-cicd`, `hunt-tls-network`, `hunt-ntlm-info` |
+| **Post-exploitation / AD** | `hunt-active-directory`, `privilege-escalation` |
 | **Enterprise identity & perimeter** | `m365-entra-attack`, `okta-attack`, `vmware-vcenter-attack`, `enterprise-vpn-attack`, `hunt-sharepoint`, `supply-chain-attack-recon` |
 | **AI/ML model governance** | `bias-fairness-testing`, `model-robustness`, `model-monitoring`, `incident-response` |
 | **Wireless / Mobile** | `wireless`, `mapt` |
-| **Red Team** | `red-team`, `redteam-report-template`, `mid-engagement-ir-detection` |
+| **Red Team** | `red-team`, `redteam-report-template`, `mid-engagement-ir-detection`, `atomic-red-team` |
 | **Specialized** | `blockchain-security`, `ai-threat-testing`, `social-engineering`, `dfir`, `meme-coin-audit` |
 | **Bug bounty & reporting** | `bb-methodology`, `bb-local-toolkit`, `bugcrowd-reporting`, `evidence-hygiene` |
-| **Tooling** | `essential-tools`, `source-code-scanning`, `cve-poc-generator`, `cve-risk-score`, `script-generator`, `patt-fetcher` |
+| **Tooling** | `essential-tools`, `source-code-scanning`, `cve-poc-generator`, `cve-risk-score`, `script-generator`, `patt-fetcher`, `mitre-attack` |
 | **Platform / Workflow** | `hackthebox`, `hackerone`, `github-workflow`, `skill-update` |
 | **Orchestrators** | `web-chain` (self-driving 6-phase web pentest) |
 
@@ -95,12 +96,12 @@ Skills live in `skills/` — each a `SKILL.md` plus a `reference/` folder. **Two
 
 ## Scope & State (code-enforced)
 
-Scope is enforced in **code**, not by trusting the model: `tools/scope.py` (deny-wins, default-deny, wildcard/CIDR/regex) is wired into the `scope-check.py` PreToolUse hook, so **out-of-scope `Bash` commands are blocked before they run**. Structured progress lives in the resumable, scope-guarded ledger `tools/engagement-state.py` (`state.json`), which also drops out-of-scope discoveries. Commands: `docs/operations.md`.
+Scope is enforced in **code**, not by trusting the model: `tools/scope.py` (deny-wins, default-deny, wildcard/CIDR/regex) is wired into the `scope-check.py` PreToolUse hook. The hook parses each `Bash` command **shell-aware** — splitting on operators/pipes, stripping wrappers (`sudo`, `env`, `timeout`, `xargs`, `bash -c`), resolving `$VAR`, and checking every stage — so **out-of-scope targets are blocked before the command runs**, including shell-obfuscated invocations (`cd /tmp && nmap OOS`, `X=1 nmap OOS`, `echo OOS | xargs nmap`). It also resolves target-file flags (`-iL`/`-l`/`--target-file`) — reading the file and validating each host-like line — so out-of-scope targets hidden in a *readable* file are still blocked. Treat this as **defense-in-depth, not an absolute boundary**: it still cannot see targets in an *unreadable* file or piped via stdin, and is not a substitute for network-level egress controls — stay within declared scope regardless. Structured progress lives in the resumable, scope-guarded ledger `tools/engagement-state.py` (`state.json`), which also drops out-of-scope discoveries. Commands: `docs/operations.md`.
 
 ## Agent Architecture
 
 **Coordinator (inline)** — follows `skills/coordination/SKILL.md`. Holds all context; writes structured reasoning to `OUTPUT_DIR/attack-chain.md` **before every executor batch**; reads source code first; delegates 1–2 focused executors per batch (depth over breadth); tracks with TaskCreate/TaskUpdate.
-> **HARD BOUNDARY** — the coordinator NEVER runs `nmap`, `curl` (against target), `ffuf`, `gobuster`, `sqlmap`, `nikto`, `nuclei`, `masscan`, `katana`, `subfinder`, `amass`, or any scanning/exploitation tool inline. About to run one? Stop and spawn an executor.
+> **HARD BOUNDARY (code-enforced)** — the coordinator NEVER runs `nmap`, `curl` (against target), `ffuf`, `gobuster`, `sqlmap`, `nikto`, `nuclei`, `masscan`, `katana`, `subfinder`, `amass`, or any scanning/exploitation tool inline. About to run one? Stop and spawn an executor. This is enforced by the `coordinator-guard.py` PreToolUse hook (active only during an engagement): it blocks gated scanner binaries unless the command carries the executor marker `TZAR_ROLE=executor`. Toggle with `TZAR_COORDINATOR_GUARD=enforce|warn|off`.
 
 **Executors (background)** — `Agent(prompt=..., run_in_background=True)`, per `skills/coordination/reference/executor-role.md`. Full mission context; source-code-first then escalate; write findings to `OUTPUT_DIR/findings/finding-NNN/`, captures to `screenshots/` + `evidence/`.
 

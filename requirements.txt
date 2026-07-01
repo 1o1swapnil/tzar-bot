@@ -1,0 +1,20 @@
+# Tzar-Bot — runtime dependencies
+#
+# The platform is STDLIB-FIRST: init/scope/state/memory/validation/reporting-export
+# and the MCP servers run on the Python standard library alone. The packages below
+# are OPTIONAL and only needed for specific feature tools. On Kali (PEP 668 /
+# externally-managed) these are installed into per-tool virtualenvs, NOT system-wide:
+#   tools/.venv        generate-report.py  (PDF)         -> reportlab, Pillow
+#   tools/.venv-docx   md-to-docx.py       (DOCX export) -> python-docx
+#   playwright runtime playwright-mcp-server.py          -> playwright (+ `playwright install`)
+#
+# Install a feature's deps into its venv, e.g.:
+#   python3 -m venv tools/.venv && tools/.venv/bin/pip install reportlab Pillow
+#
+# Pins are floors verified against Python 3.11–3.13.
+
+reportlab>=4.0      # generate-report.py — canonical PDF report
+Pillow>=10.0        # generate-report.py — image embedding in PDFs
+python-docx>=1.1    # md-to-docx.py — DOCX compliance-mapping export
+playwright>=1.40    # playwright-mcp-server.py — authenticated browser automation
+anthropic>=0.69     # engagement-runner.py — Claude API loop (output_config + adaptive thinking)

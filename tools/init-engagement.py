@@ -224,6 +224,18 @@ def main():
     if _mem.returncode != 0:
         print(f"  [warn] session-memory registration failed: {_mem.stderr.decode().strip()}", file=sys.stderr)
 
+    # Tooling preflight — probe binaries/root for this engagement type, write preflight.json,
+    # and surface gaps + fallbacks up-front (to stderr, so `eval $(...)` scripting is unaffected).
+    _pf = _sp.run(
+        [sys.executable, str(BASE_DIR / "tools" / "preflight.py"), "check",
+         "--type", eng_type, "--output-dir", str(output_dir)],
+        capture_output=True,
+    )
+    if _pf.stdout:
+        sys.stderr.write(_pf.stdout.decode(errors="replace") + "\n")
+    if _pf.returncode != 0 and _pf.stderr:
+        print(f"  [warn] preflight failed: {_pf.stderr.decode().strip()}", file=sys.stderr)
+
     # Print checklist
     pad = str(output_dir)
     if len(pad) > 50:
@@ -233,6 +245,7 @@ def main():
     print(f"  attack-chain.md initialised")
     print(f"  engagement.json written")
     print(f"  session memory registered (memory.db)")
+    print(f"  preflight.json written (tooling capability matrix)")
     print()
 
     # Emit shell-exportable OUTPUT_DIR for scripting

@@ -788,14 +788,16 @@ These are valid ONLY when combined with a chain that proves real impact:
 
 ---
 
-## WORDLISTS (Installed in ~/wordlists/)
+## WORDLISTS
+
+SecLists ships with Kali at **`/usr/share/seclists/`** (`export SL=/usr/share/seclists`); `rockyou` is at `/usr/share/wordlists/rockyou.txt.gz` (gzipped). For the full vuln-class → path map (discovery, subdomains, passwords/usernames, per-class injection payloads, web shells), see **`reference/wordlist-map.md`** — the source of truth for wordlist paths.
 
 ```
-common.txt         # Common directories and files
-params.txt         # Parameter names (id, user_id, file, etc.)
-api-endpoints.txt  # API endpoint paths (/api/v1/users, etc.)
-dirs.txt           # Directory names
-sensitive.txt      # Sensitive paths (.env, config.json, backup, etc.)
+$SL/Discovery/Web-Content/raft-large-directories.txt   # Directories
+$SL/Discovery/Web-Content/raft-large-files.txt         # Files
+$SL/Discovery/Web-Content/burp-parameter-names.txt     # Parameter names
+$SL/Discovery/Web-Content/api/api-endpoints.txt        # API endpoint paths
+$SL/Discovery/DNS/subdomains-top1million-110000.txt    # Subdomains
 ```
 
 ### Built-in Paths Worth Fuzzing

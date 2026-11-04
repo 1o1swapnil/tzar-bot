@@ -64,9 +64,10 @@ from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    PageBreak, HRFlowable, KeepTogether, Preformatted
+    PageBreak, HRFlowable, KeepTogether, Preformatted, Image
 )
 from reportlab.platypus.flowables import Flowable
+from reportlab.lib.utils import ImageReader
 
 # ── Design tokens ──────────────────────────────────────────────────────────
 C = {
@@ -261,6 +262,8 @@ def parse_finding_md(path):
 
     return {
         "id":               Path(path).parent.name.upper().replace("FINDING-", "F-").replace("FINDING_", "F-"),
+        "dir":              str(Path(path).parent),
+        "screenshots":      [],   # filled in by load_findings()
         "title":            title,
         "severity":         sev,
         "cvss_score":       cvss_score,
@@ -276,6 +279,43 @@ def parse_finding_md(path):
     }
 
 
+IMG_EXTS = (".png", ".jpg", ".jpeg", ".gif")
+
+
+def _discover_screenshots(finding_dir, output_dir):
+    """Collect image evidence for one finding, de-duplicated and ordered.
+
+    Looks in, in priority order:
+      <finding_dir>/evidence/*      — canonical per executor-role.md
+      <finding_dir>/screenshots/*
+      <finding_dir>/*               — loose images beside description.md
+      <output_dir>/screenshots/*    — global captures named for the finding
+    """
+    fdir = Path(finding_dir)
+    name = fdir.name                      # e.g. finding-001
+    fid  = name.replace("finding-", "").replace("finding_", "")  # e.g. 001
+    seen, images = set(), []
+
+    def _add(paths):
+        for p in sorted(paths):
+            if p.suffix.lower() not in IMG_EXTS:
+                continue
+            rp = p.resolve()
+            if rp in seen or not p.is_file():
+                continue
+            seen.add(rp)
+            images.append(p)
+
+    _add((fdir / "evidence").glob("*"))
+    _add((fdir / "screenshots").glob("*"))
+    _add(fdir.glob("*"))
+    gshots = output_dir / "screenshots"
+    if gshots.is_dir():
+        # global captures are named by finding-id per the skills' convention
+        _add(p for p in gshots.glob("*") if name in p.name or (fid and fid in p.name))
+    return [str(p) for p in images]
+
+
 def load_findings(output_dir):
     """Discover and parse all finding description.md files, sorted by severity."""
     findings_dir = output_dir / "findings"
@@ -283,6 +323,8 @@ def load_findings(output_dir):
         return []
     paths = sorted(findings_dir.glob("*/description.md"))
     findings = [parse_finding_md(p) for p in paths]
+    for f in findings:
+        f["screenshots"] = _discover_screenshots(f["dir"], output_dir)
     findings.sort(key=lambda f: SEV_ORDER.index(f["severity"])
                   if f["severity"] in SEV_ORDER else len(SEV_ORDER))
     return findings
@@ -534,6 +576,40 @@ def _md_to_paragraphs(text, base_style="body"):
     return items
 
 
+# Screenshots render as top-level flowables below each finding card (not inside
+# the card's nested tables, which cannot split a tall image across a page).
+_EVIDENCE_MAX_W = PAGE_W - 2 * MARGIN - 12       # ~full content width
+_EVIDENCE_MAX_H = 320   # cap tall screenshots so one image never exceeds a page
+
+
+def _image_flowables(paths):
+    """Turn image paths into scaled ReportLab flowables with filename captions.
+
+    Each image is scaled to fit the page content width while preserving aspect
+    ratio and capped in height; unreadable/corrupt files are skipped silently.
+    Image + caption are kept together; returned as top-level flowables so they
+    flow and page-break naturally.
+    """
+    out = []
+    for path in paths:
+        try:
+            iw, ih = ImageReader(path).getSize()
+            if not iw or not ih:
+                continue
+            scale = min(_EVIDENCE_MAX_W / iw, _EVIDENCE_MAX_H / ih, 1.0)
+            img = Image(path, width=iw * scale, height=ih * scale)
+            img.hAlign = "LEFT"
+            out.append(KeepTogether([
+                img,
+                Paragraph(_escape(Path(path).name), ST["body_muted"]),
+                sp(6),
+            ]))
+        except Exception:
+            # A broken capture must never abort the whole report.
+            continue
+    return out
+
+
 def build_finding_card(f, idx):
     """Render one finding as a bordered card."""
     story = []
@@ -627,6 +703,12 @@ def build_finding_card(f, idx):
         card_rows.append([_detail_row("Remediation",
                                        _md_to_paragraphs(f["remediation"]) or [p("—")])])
 
+    # Evidence narrative stays inside the card (text splits across pages fine);
+    # screenshots are appended below the card as top-level flowables.
+    if f.get("evidence_text"):
+        card_rows.append([_detail_row("Evidence",
+                                       _md_to_paragraphs(f["evidence_text"]) or [p("—")])])
+
     # Wrap entire card in a bordered outer table
     card = Table(card_rows, colWidths=[PAGE_W - 2 * MARGIN])
     card.setStyle(TableStyle([
@@ -637,6 +719,15 @@ def build_finding_card(f, idx):
         ("BOTTOMPADDING",(0, 0), (-1, -1), 0),
     ]))
     story.append(card)
+
+    # Screenshots as top-level flowables directly beneath the card.
+    imgs = _image_flowables(f.get("screenshots", []))
+    if imgs:
+        story.append(sp(4))
+        story.append(p(f"Evidence — {f['id']}", "label"))
+        story.append(sp(2))
+        story += imgs
+
     story.append(sp(8))
     return story
 

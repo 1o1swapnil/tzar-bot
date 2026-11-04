@@ -316,6 +316,40 @@ def _discover_screenshots(finding_dir, output_dir):
     return [str(p) for p in images]
 
 
+def _load_highlights(finding_dir):
+    """Load optional screenshot-annotation metadata for a finding.
+
+    Looks for a `highlights.json` in the finding's evidence/ folder (or the
+    finding folder itself). Format — keyed by the screenshot's filename:
+
+        {
+          "screenshot.png": [
+            {"x": 120, "y": 80, "w": 260, "h": 40,
+             "label": "Reflected payload", "color": "red"},
+            {"x": 0.1, "y": 0.5, "w": 0.3, "h": 0.08, "norm": true}
+          ]
+        }
+
+    Box coords are pixels by default; set "norm": true to give them as
+    fractions (0-1) of the image's width/height. Returns {} when absent.
+    """
+    fdir = Path(finding_dir)
+    boxes = {}
+    for cand in (fdir / "evidence" / "highlights.json", fdir / "highlights.json"):
+        if not cand.is_file():
+            continue
+        try:
+            data = json.loads(cand.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                for name, spec in data.items():
+                    if isinstance(spec, list):
+                        boxes.setdefault(name, []).extend(spec)
+        except Exception:
+            # Malformed metadata must never break report generation.
+            continue
+    return boxes
+
+
 def load_findings(output_dir):
     """Discover and parse all finding description.md files, sorted by severity."""
     findings_dir = output_dir / "findings"
@@ -325,6 +359,7 @@ def load_findings(output_dir):
     findings = [parse_finding_md(p) for p in paths]
     for f in findings:
         f["screenshots"] = _discover_screenshots(f["dir"], output_dir)
+        f["highlights"]  = _load_highlights(f["dir"])
     findings.sort(key=lambda f: SEV_ORDER.index(f["severity"])
                   if f["severity"] in SEV_ORDER else len(SEV_ORDER))
     return findings
@@ -581,27 +616,105 @@ def _md_to_paragraphs(text, base_style="body"):
 _EVIDENCE_MAX_W = PAGE_W - 2 * MARGIN - 12       # ~full content width
 _EVIDENCE_MAX_H = 320   # cap tall screenshots so one image never exceeds a page
 
+# Named highlight colours (RGB) for annotation boxes.
+_HL_COLORS = {
+    "red": (220, 38, 38), "orange": (234, 88, 12), "yellow": (202, 138, 4),
+    "green": (22, 163, 74), "blue": (37, 99, 235), "magenta": (192, 38, 211),
+}
 
-def _image_flowables(paths):
+_annot_dir = None   # lazy temp dir holding annotated copies (cleaned at exit)
+
+
+def _annot_tmpdir():
+    global _annot_dir
+    if _annot_dir is None:
+        import tempfile, atexit, shutil
+        _annot_dir = tempfile.mkdtemp(prefix="tzar-annot-")
+        atexit.register(lambda: shutil.rmtree(_annot_dir, ignore_errors=True))
+    return _annot_dir
+
+
+def _annotate_image(src_path, boxes):
+    """Draw highlight boxes (and optional labels) on a copy of src_path.
+
+    Returns the annotated copy's path, or the original path if annotation is
+    not possible (PIL missing, unreadable image, no valid boxes).
+    """
+    if not boxes:
+        return src_path
+    try:
+        from PIL import Image as PILImage, ImageDraw, ImageFont
+    except Exception:
+        return src_path   # Pillow unavailable — embed the raw screenshot
+    try:
+        im = PILImage.open(src_path).convert("RGB")
+        W, H = im.size
+        draw = ImageDraw.Draw(im)
+        line_w = max(3, round(min(W, H) / 250))
+        fsize = max(14, round(min(W, H) / 45))
+        try:
+            font = ImageFont.truetype("DejaVuSans-Bold.ttf", fsize)
+        except Exception:
+            font = ImageFont.load_default()
+        drew_any = False
+        for b in boxes:
+            try:
+                norm = bool(b.get("norm"))
+                x = float(b["x"]); y = float(b["y"])
+                w = float(b["w"]); h = float(b["h"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if norm:
+                x, y, w, h = x * W, y * H, w * W, h * H
+            x0, y0, x1, y1 = x, y, x + w, y + h
+            color = _HL_COLORS.get(str(b.get("color", "red")).lower(), _HL_COLORS["red"])
+            draw.rectangle([x0, y0, x1, y1], outline=color, width=line_w)
+            label = str(b.get("label", "")).strip()
+            if label:
+                tb = draw.textbbox((0, 0), label, font=font)
+                tw, th = tb[2] - tb[0], tb[3] - tb[1]
+                pad = max(3, line_w)
+                ly = y0 - th - 2 * pad
+                if ly < 0:                 # no room above the box — put label inside top
+                    ly = y0 + pad
+                draw.rectangle([x0, ly, x0 + tw + 2 * pad, ly + th + 2 * pad], fill=color)
+                draw.text((x0 + pad, ly + pad), label, fill=(255, 255, 255), font=font)
+            drew_any = True
+        if not drew_any:
+            return src_path
+        out = str(Path(_annot_tmpdir()) / (Path(src_path).stem + "-annotated.png"))
+        im.save(out)
+        return out
+    except Exception:
+        return src_path
+
+
+def _image_flowables(paths, highlights=None):
     """Turn image paths into scaled ReportLab flowables with filename captions.
 
     Each image is scaled to fit the page content width while preserving aspect
     ratio and capped in height; unreadable/corrupt files are skipped silently.
-    Image + caption are kept together; returned as top-level flowables so they
-    flow and page-break naturally.
+    If `highlights` maps a screenshot's filename to annotation boxes, the image
+    is drawn with those highlights first. Image + caption are kept together and
+    returned as top-level flowables so they flow and page-break naturally.
     """
+    highlights = highlights or {}
     out = []
     for path in paths:
         try:
-            iw, ih = ImageReader(path).getSize()
+            name = Path(path).name
+            draw_path = _annotate_image(path, highlights.get(name))
+            annotated = draw_path != path
+            iw, ih = ImageReader(draw_path).getSize()
             if not iw or not ih:
                 continue
             scale = min(_EVIDENCE_MAX_W / iw, _EVIDENCE_MAX_H / ih, 1.0)
-            img = Image(path, width=iw * scale, height=ih * scale)
+            img = Image(draw_path, width=iw * scale, height=ih * scale)
             img.hAlign = "LEFT"
+            caption = name + ("  (highlighted)" if annotated else "")
             out.append(KeepTogether([
                 img,
-                Paragraph(_escape(Path(path).name), ST["body_muted"]),
+                Paragraph(_escape(caption), ST["body_muted"]),
                 sp(6),
             ]))
         except Exception:
@@ -721,7 +834,7 @@ def build_finding_card(f, idx):
     story.append(card)
 
     # Screenshots as top-level flowables directly beneath the card.
-    imgs = _image_flowables(f.get("screenshots", []))
+    imgs = _image_flowables(f.get("screenshots", []), f.get("highlights"))
     if imgs:
         story.append(sp(4))
         story.append(p(f"Evidence — {f['id']}", "label"))

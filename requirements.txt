@@ -1,0 +1,19 @@
+# Python dependencies for tzar-bot tooling.
+#
+# Install into a virtualenv:
+#     python3 -m venv tools/.venv
+#     tools/.venv/bin/pip install -r requirements.txt
+#     tools/.venv/bin/python -m playwright install chromium   # browser for Playwright
+#
+# (generate-report.py self-bootstraps tools/.venv with reportlab + pillow on
+#  first run, but installing from this file sets everything up up front.)
+
+reportlab>=4.0        # tools/generate-report.py  — PDF report builder
+pillow>=10.0          # tools/generate-report.py, tools/burp-playwright-capture.py
+                      #                            — embed/annotate evidence screenshots
+playwright>=1.40      # tools/burp-playwright-capture.py, tools/playwright-mcp-server.py
+                      #   NOTE: also run `python -m playwright install chromium`
+python-docx>=1.0      # tools/md-to-docx.py        — Markdown -> .docx export
+
+# Standard-library only (no pip needed): the Burp MCP client in
+# tools/burp-playwright-capture.py speaks MCP-over-SSE using urllib/threading.

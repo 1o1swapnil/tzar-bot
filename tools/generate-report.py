@@ -306,8 +306,8 @@ def _discover_screenshots(finding_dir, output_dir):
             seen.add(rp)
             images.append(p)
 
-    _add((fdir / "evidence").glob("*"))
-    _add((fdir / "screenshots").glob("*"))
+    _add((fdir / "evidence").rglob("*"))   # recurse: catches evidence/screenshots/*
+    _add((fdir / "screenshots").rglob("*"))
     _add(fdir.glob("*"))
     gshots = output_dir / "screenshots"
     if gshots.is_dir():
@@ -770,68 +770,35 @@ def build_finding_card(f, idx):
         ("LINEBELOW",     (0, 0), (-1, -1), 0.4, C["border"]),
     ]))
 
-    card_rows = [[header_row], [meta_row]]
+    # Header + metadata bands are short → safe as tables. Detail sections are
+    # emitted as TOP-LEVEL flowables (not nested in an outer card table) so a
+    # long Description/Impact can split across pages — a nested table cell
+    # taller than one page raises reportlab LayoutError.
+    story.append(header_row)
+    story.append(meta_row)
 
-    def _detail_row(label, content_flowables):
-        label_cell = Paragraph(label, ST["label"])
-        content_cell = content_flowables
-        inner = Table(
-            [[label_cell, content_cell]],
-            colWidths=[90, PAGE_W - 2 * MARGIN - 90 - 20],
-        )
-        inner.setStyle(TableStyle([
-            ("VALIGN",       (0, 0), (-1, -1), "TOP"),
-            ("LEFTPADDING",  (0, 0), (0, -1), 10),
-            ("LEFTPADDING",  (1, 0), (1, -1), 6),
-            ("TOPPADDING",   (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING",(0, 0), (-1, -1), 6),
-            ("LINEBELOW",    (0, 0), (-1, -1), 0.4, C["border"]),
-        ]))
-        row = Table([[inner]], colWidths=[PAGE_W - 2 * MARGIN])
-        row.setStyle(TableStyle([
-            ("BACKGROUND",    (0, 0), (-1, -1), C["bg"]),
-            ("LINEBELOW",     (0, 0), (-1, -1), 0.4, C["border"]),
-        ]))
-        return row
+    def _section(label, content_flowables):
+        # Keep the label with its first line so a heading never orphans at a
+        # page bottom; the rest of the content flows and splits freely.
+        rest = content_flowables[1:] if content_flowables else []
+        first = content_flowables[:1] if content_flowables else [p("—")]
+        return [sp(4), KeepTogether([p(label, "label"), *first]), *rest, sp(2)]
 
     if f["affected_component"]:
-        card_rows.append([_detail_row(
-            "Affected Component",
-            [Paragraph(_escape(f["affected_component"]), ST["code"])]
-        )])
-
+        story += _section("Affected Component",
+                          [Paragraph(_escape(f["affected_component"]), ST["code"])])
     if f["description"]:
-        card_rows.append([_detail_row("Description",
-                                       _md_to_paragraphs(f["description"]) or [p("—")])])
-
+        story += _section("Description", _md_to_paragraphs(f["description"]) or [p("—")])
     if f["steps_to_reproduce"]:
-        card_rows.append([_detail_row("Steps to Reproduce",
-                                       _md_to_paragraphs(f["steps_to_reproduce"]) or [p("—")])])
-
+        story += _section("Steps to Reproduce",
+                          _md_to_paragraphs(f["steps_to_reproduce"]) or [p("—")])
     if f["business_impact"]:
-        card_rows.append([_detail_row("Business Impact",
-                                       _md_to_paragraphs(f["business_impact"]) or [p("—")])])
-
+        story += _section("Business Impact",
+                          _md_to_paragraphs(f["business_impact"]) or [p("—")])
     if f["remediation"]:
-        card_rows.append([_detail_row("Remediation",
-                                       _md_to_paragraphs(f["remediation"]) or [p("—")])])
-
-    # Evidence narrative stays inside the card (text splits across pages fine);
-    # screenshots are appended below the card as top-level flowables.
+        story += _section("Remediation", _md_to_paragraphs(f["remediation"]) or [p("—")])
     if f.get("evidence_text"):
-        card_rows.append([_detail_row("Evidence",
-                                       _md_to_paragraphs(f["evidence_text"]) or [p("—")])])
-
-    # Wrap entire card in a bordered outer table
-    card = Table(card_rows, colWidths=[PAGE_W - 2 * MARGIN])
-    card.setStyle(TableStyle([
-        ("BOX",     (0, 0), (-1, -1), 1, C["border"]),
-        ("LEFTPADDING",  (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING",   (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING",(0, 0), (-1, -1), 0),
-    ]))
-    story.append(card)
+        story += _section("Evidence", _md_to_paragraphs(f["evidence_text"]) or [p("—")])
 
     # Screenshots as top-level flowables directly beneath the card.
     imgs = _image_flowables(f.get("screenshots", []), f.get("highlights"))

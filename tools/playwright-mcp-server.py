@@ -453,26 +453,19 @@ HANDLERS = {
 # ── MCP stdio framing ─────────────────────────────────────────────────────────
 
 def read_message():
-    headers = {}
+    """Read one newline-delimited JSON-RPC message (MCP stdio transport)."""
     while True:
         raw = sys.stdin.buffer.readline()
         if not raw:
             return None
-        line = raw.rstrip(b"\r\n")
-        if not line:
-            break
-        if b":" in line:
-            k, _, v = line.partition(b":")
-            headers[k.strip().lower()] = v.strip()
-    length = int(headers.get(b"content-length", 0))
-    if not length:
-        return None
-    return json.loads(sys.stdin.buffer.read(length).decode("utf-8"))
+        raw = raw.strip()
+        if raw:
+            return json.loads(raw.decode("utf-8"))
 
 
 def send_message(obj):
-    body = json.dumps(obj).encode("utf-8")
-    sys.stdout.buffer.write(f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+    """Write one newline-delimited JSON-RPC message."""
+    sys.stdout.buffer.write(json.dumps(obj).encode("utf-8") + b"\n")
     sys.stdout.buffer.flush()
 
 

@@ -46,12 +46,34 @@ def _bootstrap_venv():
     subprocess.run([str(_VENV_PY), "-m", "pip", "install",
                     "reportlab", "pillow", "-q"], check=True, capture_output=True)
     print("[setup] Done. Restarting …", flush=True)
+    os.environ[_REEXEC_ENV] = "1"
     os.execv(str(_VENV_PY), [str(_VENV_PY)] + sys.argv)
+
+# Marker set before every re-exec into tools/.venv. Without it, a venv that
+# exists but lacks reportlab (e.g. rebuilt for another tool) re-execs forever.
+_REEXEC_ENV = "TZAR_REPORT_REEXEC"
+_REPAIR_ENV = "TZAR_REPORT_REPAIRED"
+_DEPS = ["reportlab>=4.0", "pillow>=10.0"]
 
 try:
     import reportlab
 except ImportError:
-    if _VENV_PY.exists():
+    _venv_dir = (_HERE / ".venv").resolve()
+    _in_venv = Path(sys.prefix).resolve() == _venv_dir
+    if os.environ.get(_REEXEC_ENV) == "1" or _in_venv:
+        # Already running in tools/.venv and it is missing the deps:
+        # try one in-place repair, then fail loudly instead of looping.
+        if os.environ.get(_REPAIR_ENV) != "1" and _VENV_PY.exists():
+            print("[setup] tools/.venv is missing reportlab/pillow; installing …", flush=True)
+            r = subprocess.run([str(_VENV_PY), "-m", "pip", "install", "-q", *_DEPS])
+            if r.returncode == 0:
+                os.environ[_REPAIR_ENV] = "1"
+                os.environ[_REEXEC_ENV] = "1"
+                os.execv(str(_VENV_PY), [str(_VENV_PY)] + sys.argv)
+        sys.exit("[error] reportlab is not importable in tools/.venv. Fix with:\n"
+                 f"  {_VENV_PY} -m pip install -r {_HERE.parent / 'requirements.txt'}")
+    elif _VENV_PY.exists():
+        os.environ[_REEXEC_ENV] = "1"
         os.execv(str(_VENV_PY), [str(_VENV_PY)] + sys.argv)
     else:
         _bootstrap_venv()

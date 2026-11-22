@@ -78,7 +78,7 @@ Skills live in `skills/` — each a `SKILL.md` plus a `reference/` folder. **Two
 | **Wireless / Mobile** | `wireless`, `mapt` |
 | **Red Team** | `red-team`, `redteam-report-template`, `mid-engagement-ir-detection` |
 | **Specialized** | `blockchain-security`, `ai-threat-testing`, `social-engineering`, `dfir`, `meme-coin-audit` |
-| **Bug bounty & reporting** | `bb-methodology`, `bb-local-toolkit`, `bugcrowd-reporting`, `evidence-hygiene` |
+| **Bug bounty & reporting** | `bb-methodology`, `bb-local-toolkit`, `bugcrowd-reporting`, `evidence-hygiene`, `pentest-evidence-capture` |
 | **Tooling** | `essential-tools`, `source-code-scanning`, `cve-poc-generator`, `cve-risk-score`, `script-generator`, `patt-fetcher` |
 | **Platform / Workflow** | `hackthebox`, `hackerone`, `github-workflow`, `skill-update` |
 | **Orchestrators** | `web-chain` (self-driving 6-phase web pentest) |

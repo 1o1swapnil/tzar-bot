@@ -8,8 +8,8 @@ Registered in .mcp.json as "playwright". Maintains a single stateful browser
 session for the lifetime of the server process.
 
 Install prerequisites:
-    sudo apt-get install -y python3-playwright
-    python3 -m playwright install chromium
+    tools/.venv/bin/pip install playwright   # (Debian python3-playwright driver is broken)
+    tools/.venv/bin/python -m playwright install chromium
 
 Tools exposed:
     browser_navigate       Navigate to a URL, return title + final URL
@@ -52,8 +52,8 @@ def _ensure_browser(headless: bool = True):
     except ImportError:
         raise RuntimeError(
             "Playwright not installed. Run:\n"
-            "  sudo apt-get install -y python3-playwright\n"
-            "  python3 -m playwright install chromium"
+            "  tools/.venv/bin/pip install playwright   # (Debian python3-playwright driver is broken)\n"
+            "  tools/.venv/bin/python -m playwright install chromium"
         )
     _playwright = sync_playwright().start()
     _browser    = _playwright.chromium.launch(headless=headless)

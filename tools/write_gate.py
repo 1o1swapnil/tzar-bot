@@ -142,6 +142,125 @@ def decide(ops, meta):
     return ("deny" if policy == "deny" else "ask"), pending
 
 
+# ── Approval state shared with the egress proxy (tools/egress.py) ────────────
+# The proxy sees every HTTP(S) request, including ones the PreToolUse hook can't parse.
+# Writes it sees are allowed when (a) the policy/pre-approvals allow them, (b) the hook
+# just put the same METHOD+URL to the operator ("intent", one use, short TTL — the
+# operator's yes at the prompt is what lets the call run), or (c) the operator approved
+# a pending id with `python3 tools/egress.py approve <id>`.
+import fcntl as _fcntl
+import hashlib as _hashlib
+import os as _os
+import time as _time
+
+INTENT_TTL = 180
+
+
+def state_dir() -> Path:
+    d = Path(_os.environ.get("TZAR_EGRESS_DIR")
+             or (Path(__file__).resolve().parent.parent / ".tzar" / "egress"))
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def norm_url(url: str) -> str:
+    try:
+        p = urlsplit(url)
+    except ValueError:
+        return url
+    host = (p.hostname or "").lower()
+    port = p.port
+    default = {"http": 80, "https": 443}.get(p.scheme.lower())
+    netloc = host if port in (None, default) else f"{host}:{port}"
+    if ":" in host and not host.startswith("["):
+        netloc = f"[{host}]" + ("" if port in (None, default) else f":{port}")
+    return f"{p.scheme.lower()}://{netloc}{p.path or '/'}" + (f"?{p.query}" if p.query else "")
+
+
+def request_id(method: str, url: str) -> str:
+    return _hashlib.sha256(f"{method.upper()} {norm_url(url)}".encode()).hexdigest()[:10]
+
+
+class _State:
+    """Tiny locked JSON store under state_dir()."""
+
+    def __init__(self, name):
+        self.path = state_dir() / name
+        self.lock = state_dir() / ".lock"
+
+    def __enter__(self):
+        self._lf = open(self.lock, "a+")
+        _fcntl.flock(self._lf, _fcntl.LOCK_EX)
+        try:
+            self.data = json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            self.data = {}
+        return self
+
+    def __exit__(self, *exc):
+        if exc[0] is None:
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self.data, indent=1))
+            _os.replace(tmp, self.path)
+        _fcntl.flock(self._lf, _fcntl.LOCK_UN)
+        self._lf.close()
+
+
+def record_intent(method, url):
+    if not url:
+        return
+    rid = request_id(method, url)
+    with _State("intents.json") as st:
+        now = _time.time()
+        st.data = {k: v for k, v in st.data.items() if v.get("expires", 0) > now}
+        st.data[rid] = {"method": method.upper(), "url": norm_url(url),
+                        "expires": now + INTENT_TTL}
+
+
+def consume_approval(method, url):
+    """One-use: hook intent or operator approval for exactly this METHOD+URL."""
+    rid = request_id(method, url)
+    now = _time.time()
+    with _State("intents.json") as st:
+        st.data = {k: v for k, v in st.data.items() if v.get("expires", 0) > now}
+        if st.data.pop(rid, None):
+            return "operator approved at the prompt"
+    with _State("approvals.json") as st:
+        a = st.data.get(rid)
+        if a and a.get("uses", 1) > 0:
+            a["uses"] = a.get("uses", 1) - 1
+            if a["uses"] <= 0:
+                st.data.pop(rid)
+            return "operator approved via egress.py approve"
+    return None
+
+
+def add_pending(method, url, reason):
+    rid = request_id(method, url)
+    with _State("pending.json") as st:
+        e = st.data.setdefault(rid, {"method": method.upper(), "url": norm_url(url),
+                                     "reason": reason, "first_seen": _time.time(), "count": 0})
+        e["count"] += 1
+        e["last_seen"] = _time.time()
+    return rid
+
+
+def approve_pending(rid, uses=1):
+    with _State("pending.json") as st:
+        e = st.data.pop(rid, None)
+    if not e:
+        return None
+    with _State("approvals.json") as st:
+        st.data[rid] = {"method": e["method"], "url": e["url"], "uses": uses,
+                        "approved": _time.time()}
+    return e
+
+
+def list_pending():
+    with _State("pending.json") as st:
+        return dict(st.data)
+
+
 # ── Human CLI ────────────────────────────────────────────────────────────────
 def _resolve_dir(arg):
     if arg:

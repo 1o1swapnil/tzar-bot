@@ -254,21 +254,24 @@ UI_WRITE_WORDS = re.compile(
 # ── Trust anchors: changing these changes what the gate enforces → human approval ──
 PROTECTED = re.compile(
     r"(?:^|[\s/'\"=])(?:[\w./-]*/)?(?:engagement\.json|\.tzar/[\w.-]*|config/allowed-hosts\.txt|"
-    r"config/safe-prefixes\.txt|tools/scope-check\.py|tools/scope\.py|tools/write_gate\.py|tools/validate-finding\.py|tools/tool-ledger\.py|logs/tool-ledger\.ndjson|"
+    r"config/safe-prefixes\.txt|tools/scope-check\.py|tools/scope\.py|tools/write_gate\.py|tools/validate-finding\.py|tools/tool-ledger\.py|tools/egress\.py|tools/egress_addon\.py|logs/tool-ledger\.ndjson|"
     r"\.claude/settings(?:\.local)?\.json)")
+EGRESS_ESCAPE_TOOLS = {"nft", "iptables", "ip6tables", "iptables-nft", "iptables-legacy",
+                       "iptables-restore", "nft-restore", "ufw", "firewall-cmd", "systemd-run",
+                       "nsenter", "unshare", "firejail", "bwrap"}
 CODE_FILE_WRITE = re.compile(
     r"write_text|write_bytes|open\([^)]*['\"][wax]\+?['\"]|\.write\(|json\.dump\(|shutil\.|"
     r"os\.(?:replace|rename|remove|unlink)|\.unlink\(|\.rename\(|writeFileSync|writeFile\(")
 PROTECTED_REDIRECT = re.compile(
     r">{1,2}\s*['\"]?[^\s'\"]*(?:engagement\.json|\.tzar/|allowed-hosts\.txt|safe-prefixes\.txt|"
-    r"scope-check\.py|scope\.py|write_gate\.py|validate-finding\.py|tool-ledger\.(?:py|ndjson)|settings(?:\.local)?\.json)")
+    r"scope-check\.py|scope\.py|write_gate\.py|validate-finding\.py|tool-ledger\.(?:py|ndjson)|egress(?:_addon)?\.py|settings(?:\.local)?\.json)")
 READONLY_TOOLS = {"cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg", "jq",
                   "wc", "ls", "stat", "diff", "cmp", "file", "sed", "awk", "gawk", "sha256sum",
                   "md5sum", "realpath", "readlink", "test", "[", "echo", "printf", "perl"}
 READONLY_REPO_TOOLS = {"scope.py", "validate-finding.py", "generate-report.py",
                        "engagement-state.py", "report-export.py", "session-memory.py",
                        "continuous-scan.py", "token-meter.py", "memory-search.py",
-                       "write_gate.py", "scope-check.py", "tool-ledger.py"}
+                       "write_gate.py", "scope-check.py", "tool-ledger.py", "egress.py"}
 
 
 def _summarise_init(args):
@@ -1349,6 +1352,27 @@ class Checker:
             self.guards.append("switches the enforced scope to engagement "
                                + (sub[i + 1] if i + 1 < len(sub) else "?"))
             return
+        if name == "egress.py" and sub and sub[0] in ("up", "down", "refresh", "confirm", "approve"):
+            self.guards.append("changes network egress control: egress.py " + " ".join(sub))
+            return
+        if tool in EGRESS_ESCAPE_TOOLS:
+            self.guards.append(f"`{tool}` can change or get around the egress firewall: "
+                               f"`{seg.strip()[:160]}`")
+            return
+        if tool == "ip" and args and args[0] in ("netns", "link", "route", "rule", "tuntap"):
+            self.guards.append(f"`ip {args[0]}` can route around the egress firewall")
+            return
+        if tool == "systemctl" and any("tzar-egress" in a for a in args):
+            self.guards.append("changes the egress proxy / rollback units: " + " ".join(args))
+            return
+        if tool in ("kill", "pkill", "killall") and any("mitm" in a.lower() for a in args):
+            self.guards.append("stops the egress proxy")
+            return
+        if tool in ("docker", "podman", "nerdctl") and args and \
+                args[0] in ("run", "exec", "compose", "start", "create"):
+            self.guards.append(f"`{tool} {args[0]}`: container traffic is forwarded, not locally "
+                               f"generated, so it bypasses the egress firewall")
+            return
         if name == "validate-finding.py" and "--replay-writes" in sub:
             self.guards.append("replays state-changing requests from replay.json against the "
                                "target: " + " ".join(sub))
@@ -1554,6 +1578,15 @@ def main():
     reasons = [f"WRITE: {op.label()}" for op in pending] + \
               [f"POLICY: {g}" for g in checker.guards]
     if reasons:
+        # Let the egress proxy recognise the exact request the operator is being asked
+        # about, so an approved write isn't blocked a second time at the proxy.
+        for op in pending:
+            if op.method in write_gate.WRITE_METHODS | write_gate.READ_METHODS and \
+                    op.url.startswith(("http://", "https://")):
+                try:
+                    write_gate.record_intent(op.method, op.url)
+                except OSError:
+                    pass
         emit_ask(reasons, output_dir, meta)
     sys.exit(0)
 

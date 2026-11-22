@@ -123,6 +123,7 @@ Python utilities the agents drive (stdlib-first; 15 are also exposed model-agnos
 | `scope.py` · `scope-check.py` | Code-enforced scope (deny-wins, fail-closed); PreToolUse block hook on Bash + Burp/Playwright MCP + WebFetch; active engagement via `scope.py --activate` (config: `config/allowed-hosts.txt`, `config/safe-prefixes.txt`) |
 | `write_gate.py` | Write-request gate: state-changing requests (PUT/PATCH/DELETE, non-auth POST, GraphQL mutations, risky sqlmap, PoC writes) need operator approval per engagement `write_policy` (`ask`/`deny`/`allow`); pre-approve with `write_gate.py allow` |
 | `validate-finding.py` · `tool-ledger.py` | Validator **reproduces** findings from `replay.json` (scope + write-gated) and checks a hook-written, hash-chained tool ledger; VALIDATED / UNVERIFIED / REJECTED; reports include only VALIDATED |
+| `egress.py` · `egress_addon.py` | Network-level egress control: nftables limits the operator's cgroup to in-scope IPs + DNS + Anthropic API; mitmproxy enforces hostname scope and the write gate on real HTTP(S); self-check + auto-rollback |
 | `generate-report.py` | Canonical tzar-bot-style **PDF** report |
 | `report-export.py` | **NEW** — offline **JSON + HTML** report export (no reportlab, no network) |
 | `token-meter.py` | **NEW** — token/cost telemetry, budgets, `ingest` (semi-auto capture), pricing card |

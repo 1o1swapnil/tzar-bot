@@ -110,9 +110,18 @@ python3 tools/validate-finding.py "$OUTPUT_DIR" --all                  # all fin
 
 # Offline JSON/HTML export — no reportlab, no network (air-gapped box / CI / quick preview)
 python3 tools/report-export.py "$OUTPUT_DIR" --format both   # -> reports/report.json + reports/report.html
+# Both report tools include only VALIDATED findings; add --include-unverified to add the rest, marked.
 ```
 
-Validators run 5 checks (CVSS consistency, evidence exists, PoC validation, claims-vs-raw-evidence, log corroboration); ALL must pass or the finding is rejected to `OUTPUT_DIR/artifacts/false-positives/`. The mechanical pre-check catches CVSS/severity mismatches, missing evidence, PoC syntax errors, and absent logs — only escalate to an agent validator when it flags `evidence_exists` or `claims_vs_evidence` (human/LLM judgment). Validators follow `skills/coordination/reference/validator-role.md`.
+`validate-finding.py` **reproduces** each finding instead of only checking its format. Six checks: CVSS consistency, evidence exists, PoC validity, claims-vs-evidence, **log corroboration against the hook-written tool ledger** (`logs/tool-ledger.ndjson`, appended by the `tool-ledger.py` PostToolUse hook, SHA-256 hash-chained, edits approval-gated; a broken chain rejects), and **independent replay** of `findings/finding-NNN/replay.json` (scope-checked, write-gated; fresh transcript saved to `evidence/replay-<UTC>.txt`, secrets redacted). Format: `skills/coordination/reference/executor-role.md`.
+
+| Verdict | When | Where | In the report? |
+|---|---|---|---|
+| VALIDATED | all pass + replay reproduced | `artifacts/validated/` | yes |
+| UNVERIFIED | nothing failed, not reproduced (no replay.json, status-only oracle, authz without a control request, unapproved write, expired creds, network error) | `artifacts/unverified/` | only with `--include-unverified`, titled `[Unverified]` |
+| REJECTED | any check failed, incl. a replay that didn't reproduce | `artifacts/false-positives/` | no |
+
+One verdict file per finding (stale ones are removed on every run). Old `validated/` files with no replay record count as UNVERIFIED. Flags: `--no-replay`, `--replay-writes` (operator approval prompt), `--strict`. `python3 tools/tool-ledger.py verify "$OUTPUT_DIR"` checks the chain. Agent validators then judge what the tool can't (oracle strength, control quality, CVSS) per `skills/coordination/reference/validator-role.md`.
 
 ---
 
@@ -208,8 +217,9 @@ Compares upstream-then vs upstream-now via `tools/bughunter-sync.manifest.json`,
 │       ├── recon/                      ← nmap, whatweb, gobuster, ffuf output
 │       ├── findings/finding-NNN/       ← description.md, poc.py, evidence/
 │       ├── screenshots/  evidence/     ← captures
-│       ├── logs/                       ← NDJSON executor logs + engine.log
-│       ├── artifacts/validated/        ← validator-approved findings JSON
+│       ├── logs/                       ← NDJSON executor logs, engine.log, tool-ledger.ndjson (hook-written)
+│       ├── artifacts/validated/        ← reproduced findings (replay passed)
+│       ├── artifacts/unverified/       ← not reproduced, not disproved
 │       ├── artifacts/false-positives/  ← rejected findings with reason
 │       └── reports/                    ← Penetration-Test-Report.pdf + .json
 ├── skills/    ← all SKILL.md + reference/ files

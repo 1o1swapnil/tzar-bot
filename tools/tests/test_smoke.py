@@ -374,6 +374,10 @@ def _engagement_with_finding(tmp_path):
         "| Severity | High |\n| CVSS Score | 7.4 |\n"
         "| Affected Component | https://acme.com/search?q= |\n\n"
         "The q parameter reflects <script> input unsanitised.\n")
+    (tmp_path / "artifacts" / "validated").mkdir(parents=True)
+    (tmp_path / "artifacts" / "validated" / "finding-001.json").write_text(json.dumps(
+        {"finding_id": "finding-001", "verdict": "validated",
+         "replay": {"requests": [{"name": "exploit", "passed": True}]}}))
     return tmp_path
 
 
@@ -390,6 +394,17 @@ def test_report_export_json_and_html(tmp_path):
     html = (out / "reports" / "report.html").read_text()
     assert "Reflected XSS in search" in html
     assert "&lt;script&gt;" in html             # body is HTML-escaped, not injected
+
+
+def test_report_export_gates_unreproduced(tmp_path):
+    out = _engagement_with_finding(tmp_path)
+    (out / "artifacts" / "validated" / "finding-001.json").unlink()
+    r = run([PY, str(TOOLS / "report-export.py"), str(out), "--format", "json"])
+    assert r.returncode == 0, r.stderr
+    assert json.loads((out / "reports" / "report.json").read_text())["summary"]["total"] == 0
+    r = run([PY, str(TOOLS / "report-export.py"), str(out), "--format", "json",
+             "--include-unverified"])
+    assert json.loads((out / "reports" / "report.json").read_text())["summary"]["total"] == 0
 
 
 # ── 18. token-meter ingest (semi-auto capture, isolated DB) ───────────────────

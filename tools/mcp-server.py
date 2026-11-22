@@ -69,10 +69,10 @@ TOOL_DEFS = [
     {
         "name": "validate_finding",
         "description": (
-            "Run the 5-check validation protocol on a single finding directory: "
+            "Validate a single finding by reproducing it (6 checks): "
             "CVSS consistency, evidence exists, PoC validity, claims vs evidence, "
-            "log corroboration. Writes JSON result to artifacts/validated/ or "
-            "artifacts/false-positives/."
+            "ledger corroboration, independent replay of replay.json. Verdict VALIDATED / "
+            "UNVERIFIED / REJECTED → artifacts/validated|unverified|false-positives/."
         ),
         "inputSchema": {
             "type": "object",

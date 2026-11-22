@@ -68,6 +68,7 @@ For each confirmed finding, create:
 OUTPUT_DIR/findings/finding-NNN/
 ├── description.md      # Finding details (see format below)
 ├── poc.py              # Proof-of-concept script (or poc.sh)
+├── replay.json         # REQUIRED: machine-checkable reproduction (see below)
 └── evidence/
     ├── request.txt     # Raw HTTP request
     ├── response.txt    # Raw HTTP response
@@ -160,6 +161,37 @@ OAuth/MFA flow, use the `playwright` MCP server instead of curl.
 to text extracted via `browser_get_text` — scrub before embedding in reports).
 
 See `reference/playwright-guide.md` for full patterns (OAuth, MFA bypass, workflow skip, race conditions).
+
+## replay.json — how the validator reproduces your finding
+
+`tools/validate-finding.py` re-sends these requests itself and checks each response. A finding
+without a passing replay is **UNVERIFIED** and stays out of the report. Write the oracle so it
+proves the *claim*, not just that the server answered.
+
+```json
+{
+  "requests": [
+    {"name": "exploit", "method": "GET",
+     "url": "https://api.acme.com/v1/users/2",
+     "headers": {"Authorization": "Bearer {{env:ACME_USER_A_TOKEN}}"},
+     "expect": {"status": [200], "body_contains": ["\"email\":\"victim@"]}},
+    {"name": "control", "role": "control", "method": "GET",
+     "url": "https://api.acme.com/v1/users/2",
+     "expect": {"status": [401, 403], "body_not_contains": ["victim@"]}}
+  ]
+}
+```
+
+- `expect` keys: `status`, `body_contains`, `body_not_contains`, `body_regex`, `headers_contain`.
+  At least one request must assert on the **body or headers** — a status code alone is UNVERIFIED.
+- **Authorization findings (IDOR/BOLA/BFLA, missing auth, privilege escalation) need a `control`
+  request** showing the access should be denied (unauthenticated, lower role, or the owner's view).
+- Credentials: `{{env:VAR}}` placeholders, resolved through `tools/env-reader.py`; the tool redacts
+  `Authorization`/`Cookie`/API-key headers in the saved transcript. Never paste raw tokens.
+- Prefer read-only reproductions. A replay request that changes state is not sent unless the
+  operator approves it (`--replay-writes` prompt or `write_gate.py allow`).
+- Your tool calls are recorded by a hook in `logs/tool-ledger.ndjson` (hash-chained). That — not
+  notes you write — is what check 5 uses. Don't write to it.
 
 ## PoC Script Requirements
 

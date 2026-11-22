@@ -104,9 +104,9 @@ Scope is enforced in **code**, not by trusting the model: `tools/scope.py` (deny
 
 **Executors (background)** — `Agent(prompt=..., run_in_background=True)`, per `skills/coordination/reference/executor-role.md`. Full mission context; source-code-first then escalate; write findings to `OUTPUT_DIR/findings/finding-NNN/`, captures to `screenshots/` + `evidence/`.
 
-**Validators (background)** — one per finding, per `skills/coordination/reference/validator-role.md`. 5 checks, ALL must pass; results to `OUTPUT_DIR/artifacts/validated|false-positives/`.
+**Validators (background)** — one per finding, per `skills/coordination/reference/validator-role.md`. Run `validate-finding.py` (6 checks incl. independent replay), then judge oracle strength, control requests and CVSS; one verdict per finding in `OUTPUT_DIR/artifacts/validated|unverified|false-positives/`.
 
-**Gates** — before reporting, run the mechanical pre-check `python3 tools/validate-finding.py "$OUTPUT_DIR" --all`, then generate the PDF with `tools/generate-report.py`. Full commands: `docs/operations.md`.
+**Gates** — every finding needs a `replay.json`; `python3 tools/validate-finding.py "$OUTPUT_DIR" --all` **re-sends it** (in scope, write-gated) and checks the hook-written tool ledger. Verdicts: VALIDATED / UNVERIFIED / REJECTED; `tools/generate-report.py` includes only VALIDATED (`--include-unverified` adds the rest, marked). Full commands: `docs/operations.md`.
 
 ---
 

@@ -97,7 +97,7 @@ FINDING_DIR: {finding_dir}
 OUTPUT_DIR: {output_dir}
 TARGET: {target}
 
-Read reference/validator-role.md for your 5-check protocol.""",
+Read reference/validator-role.md: run validate-finding.py (it replays the finding), then judge it.""",
     run_in_background=True
 )
 ```

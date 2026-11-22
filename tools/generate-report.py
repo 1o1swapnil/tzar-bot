@@ -372,13 +372,48 @@ def _load_highlights(finding_dir):
     return boxes
 
 
-def load_findings(output_dir):
-    """Discover and parse all finding description.md files, sorted by severity."""
+def _read_verdicts(output_dir):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "validate_finding", Path(__file__).resolve().parent / "validate-finding.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.read_verdicts(output_dir)
+
+
+def load_findings(output_dir, include_unverified=False):
+    """
+    Parse finding description.md files, sorted by severity — gated by validation:
+    only findings validate-finding.py reproduced (VALIDATED) go in. UNVERIFIED ones go in
+    only with include_unverified, titled "[Unverified] ". REJECTED and never-validated
+    findings are left out.
+    """
     findings_dir = output_dir / "findings"
     if not findings_dir.exists():
         return []
     paths = sorted(findings_dir.glob("*/description.md"))
-    findings = [parse_finding_md(p) for p in paths]
+    verdicts = _read_verdicts(output_dir)
+    kept, skipped = [], []
+    for p in paths:
+        fid = p.parent.name
+        v = verdicts.get(fid, "not validated")
+        if v == "validated" or (v == "unverified" and include_unverified):
+            kept.append((p, v))
+        else:
+            skipped.append((fid, v))
+    for fid, v in skipped:
+        print(f"[gate] {fid}: {v} — left out of the report"
+              + (" (pass --include-unverified to add it, marked)" if v == "unverified" else ""))
+    if skipped and not kept:
+        print("[gate] no reproduced findings. Run: python3 tools/validate-finding.py "
+              "\"$OUTPUT_DIR\" --all")
+    findings = []
+    for p, v in kept:
+        f = parse_finding_md(p)
+        f["verification"] = v
+        if v == "unverified":
+            f["title"] = "[Unverified] " + f["title"]
+        findings.append(f)
     for f in findings:
         f["screenshots"] = _discover_screenshots(f["dir"], output_dir)
         f["highlights"]  = _load_highlights(f["dir"])
@@ -1162,6 +1197,9 @@ def main():
                         "Generate compliance mapping appendix. Comma-separated frameworks: "
                         "owasp,pci,iso,nist,hipaa  or  'all'  (default: none)"
                     ))
+    ap.add_argument("--include-unverified", action="store_true",
+                    help="Also include findings validate-finding.py could not reproduce "
+                         "(titled '[Unverified]'). Default: only reproduced findings.")
     args = ap.parse_args()
 
     output_dir = Path(args.output_dir).resolve()
@@ -1197,7 +1235,7 @@ def main():
                     _compliance_frameworks=compliance_fws)
     meta     = load_metadata(output_dir, cli_args)
     meta["_compliance_frameworks"] = compliance_fws
-    findings = load_findings(output_dir)
+    findings = load_findings(output_dir, include_unverified=args.include_unverified)
 
     if not findings:
         print("[WARN] No findings found in findings/*/description.md — report will be empty.")

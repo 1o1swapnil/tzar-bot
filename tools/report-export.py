@@ -66,7 +66,7 @@ def parse_findings_dir(output_dir: Path):
     return findings
 
 
-def load_findings(output_dir: Path):
+def load_findings(output_dir: Path, include_unverified=False):
     pj = output_dir / "artifacts" / "pentest-report.json"
     if pj.exists():
         try:
@@ -83,10 +83,30 @@ def load_findings(output_dir: Path):
                     "body": f.get("description", f.get("body", "")),
                 })
             if norm:
-                return norm
+                return norm                     # written by generate-report.py (already gated)
         except (ValueError, OSError):
             pass
-    return parse_findings_dir(output_dir)
+    return _gate(output_dir, parse_findings_dir(output_dir), include_unverified)
+
+
+def _gate(output_dir: Path, findings, include_unverified):
+    """Keep only findings validate-finding.py reproduced (same rule as generate-report.py)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "validate_finding", Path(__file__).resolve().parent / "validate-finding.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    verdicts = mod.read_verdicts(output_dir)
+    kept = []
+    for f in findings:
+        v = verdicts.get(f["id"], "not validated")
+        if v == "validated" or (v == "unverified" and include_unverified):
+            if v == "unverified":
+                f["title"] = "[Unverified] " + f["title"]
+            kept.append(f)
+        else:
+            print(f"[gate] {f['id']}: {v} — left out", file=sys.stderr)
+    return kept
 
 
 def load_meta(output_dir: Path, client, target):
@@ -205,6 +225,8 @@ def main():
     ap.add_argument("--client", default="")
     ap.add_argument("--target", default="")
     ap.add_argument("--out-dir", default="", help="Output dir (default: OUTPUT_DIR/reports)")
+    ap.add_argument("--include-unverified", action="store_true",
+                    help="Also include findings that were not reproduced (marked [Unverified])")
     a = ap.parse_args()
 
     output_dir = Path(a.output_dir).resolve()
@@ -212,7 +234,7 @@ def main():
         print(f"[ERROR] OUTPUT_DIR not found: {output_dir}", file=sys.stderr)
         sys.exit(1)
 
-    findings = load_findings(output_dir)
+    findings = load_findings(output_dir, include_unverified=a.include_unverified)
     meta = load_meta(output_dir, a.client, a.target)
     out_dir = Path(a.out_dir).resolve() if a.out_dir else (output_dir / "reports")
     out_dir.mkdir(parents=True, exist_ok=True)

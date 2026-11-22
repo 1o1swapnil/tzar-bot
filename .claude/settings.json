@@ -13,6 +13,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(Bash|mcp__burp__.*|mcp__playwright__.*)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /home/kali/Documents/tzar-bot/tools/tool-ledger.py",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   },
   "skillOverrides": {

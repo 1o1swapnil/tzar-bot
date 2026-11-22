@@ -130,6 +130,10 @@ GUARDED = [
     "echo evil.com >> config/allowed-hosts.txt",
     "rm .tzar/active-engagement",
     "git checkout -- tools/write_gate.py",
+    "python3 tools/validate-finding.py WAPT/x/1 --all --replay-writes",
+    "echo '{}' >> WAPT/x/1/logs/tool-ledger.ndjson",
+    "sed -i 1d WAPT/x/1/logs/tool-ledger.ndjson",
+    "cp /tmp/v.py tools/validate-finding.py",
 ]
 
 UNGUARDED = [
@@ -141,6 +145,9 @@ UNGUARDED = [
     "git diff tools/scope-check.py",
     "python3 -c \"import json; print(json.load(open('WAPT/x/engagement.json')))\"",
     "python3 -m pytest tools/tests/test_write_gate.py -q",
+    "python3 tools/validate-finding.py WAPT/x/1 --all",
+    "python3 tools/tool-ledger.py verify WAPT/x/1",
+    "tail -5 WAPT/x/1/logs/tool-ledger.ndjson",
 ]
 
 

@@ -67,7 +67,7 @@ Each executor receives in their prompt:
 - `reference/phase-chain.md` — per-phase executor prompts and expected outputs
 - `reference/context-template.md` — attack-chain.md structure and update rules
 - `skills/coordination/reference/executor-role.md` — executor behavioral rules
-- `skills/coordination/reference/validator-role.md` — validator 5-check protocol
+- `skills/coordination/reference/validator-role.md` — validator protocol (replay + judgment)
 
 ## Output
 

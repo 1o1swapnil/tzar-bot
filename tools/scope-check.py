@@ -254,21 +254,21 @@ UI_WRITE_WORDS = re.compile(
 # ── Trust anchors: changing these changes what the gate enforces → human approval ──
 PROTECTED = re.compile(
     r"(?:^|[\s/'\"=])(?:[\w./-]*/)?(?:engagement\.json|\.tzar/[\w.-]*|config/allowed-hosts\.txt|"
-    r"config/safe-prefixes\.txt|tools/scope-check\.py|tools/scope\.py|tools/write_gate\.py|"
+    r"config/safe-prefixes\.txt|tools/scope-check\.py|tools/scope\.py|tools/write_gate\.py|tools/validate-finding\.py|tools/tool-ledger\.py|logs/tool-ledger\.ndjson|"
     r"\.claude/settings(?:\.local)?\.json)")
 CODE_FILE_WRITE = re.compile(
     r"write_text|write_bytes|open\([^)]*['\"][wax]\+?['\"]|\.write\(|json\.dump\(|shutil\.|"
     r"os\.(?:replace|rename|remove|unlink)|\.unlink\(|\.rename\(|writeFileSync|writeFile\(")
 PROTECTED_REDIRECT = re.compile(
     r">{1,2}\s*['\"]?[^\s'\"]*(?:engagement\.json|\.tzar/|allowed-hosts\.txt|safe-prefixes\.txt|"
-    r"scope-check\.py|scope\.py|write_gate\.py|settings(?:\.local)?\.json)")
+    r"scope-check\.py|scope\.py|write_gate\.py|validate-finding\.py|tool-ledger\.(?:py|ndjson)|settings(?:\.local)?\.json)")
 READONLY_TOOLS = {"cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg", "jq",
                   "wc", "ls", "stat", "diff", "cmp", "file", "sed", "awk", "gawk", "sha256sum",
                   "md5sum", "realpath", "readlink", "test", "[", "echo", "printf", "perl"}
 READONLY_REPO_TOOLS = {"scope.py", "validate-finding.py", "generate-report.py",
                        "engagement-state.py", "report-export.py", "session-memory.py",
                        "continuous-scan.py", "token-meter.py", "memory-search.py",
-                       "write_gate.py", "scope-check.py"}
+                       "write_gate.py", "scope-check.py", "tool-ledger.py"}
 
 
 def _summarise_init(args):
@@ -1348,6 +1348,10 @@ class Checker:
             i = sub.index("--activate")
             self.guards.append("switches the enforced scope to engagement "
                                + (sub[i + 1] if i + 1 < len(sub) else "?"))
+            return
+        if name == "validate-finding.py" and "--replay-writes" in sub:
+            self.guards.append("replays state-changing requests from replay.json against the "
+                               "target: " + " ".join(sub))
             return
         if name == "write_gate.py" and any(c in sub for c in ("allow", "revoke", "policy")):
             self.guards.append("changes the write policy: " + " ".join(sub))

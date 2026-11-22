@@ -1,29 +1,69 @@
 #!/usr/bin/env python3
 """
-validate-finding.py — Run the 5-check validation protocol on a finding directory.
+validate-finding.py — validate a finding by reproducing it, not by checking its format.
 
 Usage:
     python3 tools/validate-finding.py <OUTPUT_DIR/findings/finding-NNN>
-    python3 tools/validate-finding.py <OUTPUT_DIR/findings/finding-NNN> --strict
-    python3 tools/validate-finding.py <OUTPUT_DIR>  --all     # validate every finding
+    python3 tools/validate-finding.py <OUTPUT_DIR> --all          # every finding
+      --strict          warnings count as failures
+      --no-replay       skip check 6 (result can then be UNVERIFIED at best)
+      --replay-writes   allow replaying state-changing requests (the scope hook turns this
+                        into an operator approval prompt)
 
 Checks:
     1  CVSS Consistency  — score range matches severity label; vector is well-formed
     2  Evidence Exists   — evidence/ has at least one non-empty recognised file
     3  PoC Validity      — poc.py/poc.sh parses; targets the stated affected component
     4  Claims vs Evidence— affected component appears in at least one evidence file
-    5  Log Corroboration — OUTPUT_DIR/logs/ has an entry referencing this target
+    5  Log Corroboration — the hook-written, hash-chained tool ledger
+                           (logs/tool-ledger.ndjson) shows a real tool call to the target.
+                           Agent-written logs alone are only a warning (legacy engagements).
+    6  Independent Replay— re-sends the requests in replay.json (in scope, through the write
+                           gate) and checks each response against its oracle; the fresh
+                           transcript is saved to evidence/replay-<UTC>.txt.
 
-Exit: 0 = all pass,  1 = one or more fail,  2 = usage error
+Verdicts (exactly one result file per finding; stale ones are removed):
+    VALIDATED   all checks pass and the replay reproduced it → artifacts/validated/
+    UNVERIFIED  nothing failed, but it could not be reproduced (no replay.json, weak oracle,
+                authz finding without a control request, write not approved, expired
+                credentials, network error) → artifacts/unverified/
+    REJECTED    any check failed, including a replay that did not reproduce
+                → artifacts/false-positives/
+
+replay.json (written by the executor next to description.md):
+    {"requests": [
+       {"name": "exploit", "method": "GET", "url": "https://api.acme.com/v1/users/2",
+        "headers": {"Authorization": "Bearer {{env:ACME_USER_A_TOKEN}}"},
+        "expect": {"status": [200], "body_contains": ["\"email\":\"victim@"]}},
+       {"name": "control", "role": "control", "method": "GET",
+        "url": "https://api.acme.com/v1/users/2",
+        "expect": {"status": [401, 403]}}]}
+    expect keys: status, body_contains, body_not_contains, body_regex, headers_contain.
+    {{env:NAME}} is resolved through tools/env-reader.py; secrets are redacted in evidence.
+
+Exit: 0 = validated, 1 = unverified or rejected, 2 = usage error
 """
 
+import hashlib
+import importlib.util
 import os
 import re
+import ssl
 import sys
 import json
 import subprocess
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
+
+TOOLS_DIR = Path(__file__).resolve().parent
+REPO_DIR = TOOLS_DIR.parent
+sys.path.insert(0, str(TOOLS_DIR))
+from scope import Scope  # noqa: E402
+import write_gate  # noqa: E402
 
 
 # ── CVSS 3.x severity bands ──────────────────────────────────────────────────
@@ -271,49 +311,266 @@ def check_claims_vs_evidence(finding_dir, info):
     return RESULT["pass"], "Evidence text present and references the affected component"
 
 
-# ── Check 5: Log Corroboration ────────────────────────────────────────────────
-def check_log_corroboration(finding_dir, output_dir, info):
+# ── Check 5: Log Corroboration (hook-written ledger) ──────────────────────────
+def _ledger():
+    spec = importlib.util.spec_from_file_location("tool_ledger", TOOLS_DIR / "tool-ledger.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _corroboration_needles(info, replay_spec):
+    """Host + first distinctive path segment of the affected component / replay URLs."""
+    urls = []
+    if replay_spec:
+        urls += [r.get("url", "") for r in replay_spec.get("requests", []) if isinstance(r, dict)]
+    urls += re.findall(r"https?://[^\s|`)>\]]+", info.get("affected", ""))
+    if not urls:        # no Affected Component line: fall back to URLs in the write-up
+        urls += re.findall(r"https?://[^\s|`)>\]'\"]+", info.get("full_text", ""))[:5]
+    pairs = []
+    for u in urls:
+        try:
+            parts = urlsplit(u)
+        except ValueError:
+            continue
+        if not parts.hostname:
+            continue
+        segs = [s for s in parts.path.split("/") if s and not re.fullmatch(r"\{.*\}|\d+|[0-9a-f-]{16,}", s)]
+        pairs.append((parts.hostname.lower(), segs[0].lower() if segs else ""))
+    return list(dict.fromkeys(pairs))
+
+
+def check_log_corroboration(finding_dir, output_dir, info, replay_spec=None):
+    ledger = _ledger()
+    ok, msg, entries = ledger.verify(output_dir)
+    if entries:
+        if not ok:
+            return RESULT["fail"], (f"tool ledger failed verification: {msg}. Hook-written "
+                                    f"evidence was edited — treat the engagement logs as untrusted.")
+        needles = _corroboration_needles(info, replay_spec)
+        if not needles:
+            return RESULT["fail"], ("No URL in 'Affected Component' or replay.json to look for "
+                                    "in the tool ledger.")
+        for host, seg in needles:
+            hits = ledger.search(output_dir, [host, seg] if seg else [host])
+            if hits:
+                h = hits[0]
+                return RESULT["pass"], (f"tool ledger #{h['seq']} ({h['ts']}, {h['tool']}) "
+                                        f"recorded traffic to {host}/{seg} — {msg}")
+        shown = ", ".join(f"{h}/{s}" for h, s in needles[:3])
+        return RESULT["fail"], (f"No hook-recorded tool call touched {shown} ({msg}). The "
+                                f"finding was not tested by any recorded tool call.")
+
+    # Legacy engagement (no ledger): agent-written logs only — never a clean pass.
     logs_dir = output_dir / "logs"
-    affected  = info["affected"]
-
-    if not logs_dir.exists():
-        return RESULT["fail"], (
-            f"logs/ directory not found at {logs_dir}. "
-            "Executor activity logs are required to corroborate this finding."
-        )
-
-    log_files = list(logs_dir.glob("*.ndjson")) + \
-                list(logs_dir.glob("*.json"))  + \
-                list(logs_dir.glob("*.txt"))   + \
-                list(logs_dir.glob("*.log"))
-
-    if not log_files:
-        return RESULT["fail"], (
-            "logs/ directory exists but contains no log files."
-        )
-
-    # Build search tokens from affected component + finding title keywords
-    tokens = set(re.findall(r'[\w.-]{5,}', affected)) if affected else set()
-    # Add title keywords
-    title_words = [w for w in re.findall(r'\b[a-zA-Z]{5,}\b', info["title"])
-                   if w.lower() not in ("finding", "bypass", "injection", "unvalidated")]
-    tokens.update(title_words[:4])
+    log_files = [p for ext in ("*.ndjson", "*.json", "*.txt", "*.log")
+                 for p in logs_dir.glob(ext)] if logs_dir.exists() else []
+    tokens = set(re.findall(r'[\w.-]{5,}', info.get("affected", "")))
+    tokens.update([w for w in re.findall(r'\b[a-zA-Z]{5,}\b', info.get("title", ""))
+                   if w.lower() not in ("finding", "bypass", "injection", "unvalidated")][:4])
     tokens = {t for t in tokens if t not in ("https", "http", "example")}
-
     for lf in log_files:
         try:
-            content = lf.read_text(encoding="utf-8", errors="replace")
+            content = lf.read_text(encoding="utf-8", errors="replace").lower()
         except OSError:
             continue
-        if any(tok.lower() in content.lower() for tok in tokens):
-            return RESULT["pass"], f"Corroborating log entry found in {lf.name}"
+        if tokens and any(t.lower() in content for t in tokens):
+            return RESULT["warn"], (f"No tool ledger (pre-ledger engagement); only agent-written "
+                                    f"log {lf.name} mentions the target. Not independent evidence.")
+    return RESULT["fail"], "No tool ledger and no log entry references this finding's target."
 
-    return RESULT["fail"], (
-        f"No log entry found referencing this finding's target "
-        f"(searched {len(log_files)} log file(s) for: "
-        f"{', '.join(sorted(tokens)[:5])}). "
-        "The finding may not have been actively tested — check executor logs."
-    )
+
+# ── Check 6: Independent Replay ───────────────────────────────────────────────
+AUTHZ_HINTS = re.compile(
+    r"(?i)\b(idor|bola|bfla|broken (?:object|function)|access control|authori[sz]ation|"
+    r"privilege|unauthenticated|without authentication|cwe-(?:284|285|639|862|863|566|425))\b")
+SENSITIVE_HEADERS = re.compile(r"(?i)^(authorization|cookie|x-api-key|x-auth-token|api-key|"
+                               r"x-csrf-token|proxy-authorization)$")
+PLACEHOLDER = re.compile(r"\{\{env:([A-Za-z_][A-Za-z0-9_]*)\}\}")
+MAX_BODY = 2_000_000
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+def _resolve_env(names):
+    """Credentials only via tools/env-reader.py (project rule)."""
+    if not names:
+        return {}
+    r = subprocess.run([sys.executable, str(TOOLS_DIR / "env-reader.py"), *sorted(names)],
+                       capture_output=True, text=True, cwd=str(REPO_DIR), timeout=30)
+    vals = {}
+    for line in r.stdout.splitlines():
+        k, _, v = line.partition("=")
+        if k in names and v != "NOT_SET":
+            vals[k] = v
+    return vals
+
+
+def _fill(value, env):
+    if not isinstance(value, str):
+        return value
+    return PLACEHOLDER.sub(lambda m: env.get(m.group(1), m.group(0)), value)
+
+
+def _send(req, env, timeout):
+    url = _fill(req["url"], env)
+    headers = {k: _fill(v, env) for k, v in (req.get("headers") or {}).items()}
+    body = req.get("body")
+    data = None
+    if body is not None:
+        data = (json.dumps(body) if isinstance(body, (dict, list)) else _fill(str(body), env)).encode()
+    r = urllib.request.Request(url, data=data, method=req.get("method", "GET").upper(),
+                               headers=headers)
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    opener = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=ctx))
+    try:
+        resp = opener.open(r, timeout=timeout)
+        status, rheaders, rbody = resp.status, dict(resp.headers), resp.read(MAX_BODY)
+    except urllib.error.HTTPError as e:
+        status, rheaders, rbody = e.code, dict(e.headers or {}), (e.read(MAX_BODY) if e.fp else b"")
+    return status, rheaders, rbody.decode("utf-8", "replace")
+
+
+def _evaluate(expect, status, headers, body):
+    """Return list of failed assertions (empty = pass)."""
+    fails = []
+    want = expect.get("status")
+    if want is not None:
+        want = want if isinstance(want, list) else [want]
+        if status not in want:
+            fails.append(f"status {status} not in {want}")
+    for s in expect.get("body_contains", []):
+        if s not in body:
+            fails.append(f"body lacks {s!r}")
+    for s in expect.get("body_not_contains", []):
+        if s in body:
+            fails.append(f"body contains {s!r}")
+    for rx in expect.get("body_regex", []):
+        if not re.search(rx, body):
+            fails.append(f"body doesn't match /{rx}/")
+    low = {k.lower(): v for k, v in headers.items()}
+    for k, v in (expect.get("headers_contain") or {}).items():
+        if v.lower() not in str(low.get(k.lower(), "")).lower():
+            fails.append(f"header {k} lacks {v!r}")
+    return fails
+
+
+def _strong_oracle(expect):
+    return any(expect.get(k) for k in ("body_contains", "body_regex", "headers_contain",
+                                       "body_not_contains"))
+
+
+def _redact(headers, env_values):
+    out = {}
+    for k, v in headers.items():
+        out[k] = "<redacted>" if SENSITIVE_HEADERS.match(k) else v
+    return out
+
+
+def check_replay(finding_dir, output_dir, info, replay_spec, opts):
+    """
+    Re-send the finding's requests from replay.json and check the response oracle.
+    pass = reproduced now · fail = sent but did not reproduce / out of scope ·
+    skip = could not be replayed safely (→ UNVERIFIED).
+    """
+    if opts.get("no_replay"):
+        return RESULT["skip"], "replay disabled (--no-replay)", {}
+    if replay_spec is None:
+        return RESULT["skip"], ("no replay.json — the finding can't be reproduced "
+                                "independently (see executor-role.md for the format)"), {}
+    if isinstance(replay_spec, str):
+        return RESULT["fail"], f"replay.json is invalid: {replay_spec}", {}
+    reqs = replay_spec.get("requests") or []
+    if not reqs or not all(isinstance(r, dict) and r.get("url") and isinstance(r.get("expect"), dict)
+                           for r in reqs):
+        return RESULT["fail"], "replay.json needs requests[] each with url and expect{}", {}
+    if not any(_strong_oracle(r["expect"]) for r in reqs):
+        return RESULT["skip"], ("oracle too weak: at least one request must assert on the body "
+                                "or headers, not just the status code"), {}
+    text = info.get("full_text", "") + " " + info.get("title", "")
+    if AUTHZ_HINTS.search(text) and not any(r.get("role") == "control" for r in reqs):
+        return RESULT["skip"], ("authorization finding without a control request (e.g. the same "
+                                "call unauthenticated or as the owner) — a 200 alone doesn't prove "
+                                "the access was unauthorised"), {}
+
+    meta_path = output_dir / "engagement.json"
+    if not meta_path.exists():
+        return RESULT["skip"], "no engagement.json — scope unknown, not replaying", {}
+    meta = json.loads(meta_path.read_text())
+    scope = Scope.from_engagement(meta)
+    for r in reqs:
+        reason = scope.reject_reason(r["url"])
+        if reason:
+            return RESULT["fail"], f"replay URL out of scope: {r['url']} ({reason})", {}
+        op = write_gate.classify(r.get("method", "GET"), r["url"],
+                                 json.dumps(r.get("body")) if r.get("body") is not None else None,
+                                 "replay")
+        if op and not (meta.get("write_policy") == "allow"
+                       or write_gate.preapproved(op, meta.get("write_allow"))
+                       or opts.get("replay_writes")):
+            return RESULT["skip"], (f"replay needs a write ({op.label()}); rerun with "
+                                    f"--replay-writes (the hook asks the operator) or pre-approve it "
+                                    f"with tools/write_gate.py allow"), {}
+
+    names = {m for r in reqs for v in [r["url"], json.dumps(r.get("headers") or {}),
+                                       json.dumps(r.get("body"))]
+             for m in PLACEHOLDER.findall(v)}
+    env = _resolve_env(names)
+    missing = names - set(env)
+    if missing:
+        return RESULT["skip"], (f"credentials not set in .env: {', '.join(sorted(missing))} "
+                                f"(refresh the token and rerun)"), {}
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    transcript, results, fails = [], [], []
+    for i, r in enumerate(reqs, 1):
+        name = r.get("name") or f"request-{i}"
+        try:
+            status, headers, body = _send(r, env, opts.get("timeout", 20))
+        except Exception as e:                      # network error → can't conclude
+            return RESULT["skip"], f"{name}: request failed ({type(e).__name__}: {e})", {}
+        bad = _evaluate(r["expect"], status, headers, body)
+        results.append({"name": name, "role": r.get("role", "exploit"), "status": status,
+                        "passed": not bad, "failures": bad,
+                        "body_sha256": hashlib.sha256(body.encode()).hexdigest()})
+        if bad:
+            fails.append(f"{name}: " + "; ".join(bad))
+        transcript.append(
+            f"### {name} ({r.get('role', 'exploit')})\n"
+            f"{r.get('method', 'GET').upper()} {r['url']}\n"
+            + "".join(f"{k}: {v}\n" for k, v in _redact(r.get("headers") or {}, env).items())
+            + (f"\n{r['body'] if isinstance(r.get('body'), str) else json.dumps(r.get('body'))}\n"
+               if r.get("body") is not None else "")
+            + f"\n--- response: HTTP {status}\n"
+            + "".join(f"{k}: {v}\n" for k, v in _redact(headers, env).items())
+            + f"\n{body[:20000]}\n"
+            + f"--- assertions: {'PASS' if not bad else 'FAIL: ' + '; '.join(bad)}\n\n")
+        time.sleep(opts.get("delay", 0.5))
+
+    ev = finding_dir / "evidence" / f"replay-{ts}.txt"
+    ev.parent.mkdir(exist_ok=True)
+    ev.write_text(f"# Independent replay by validate-finding.py at {ts}\n\n" + "".join(transcript))
+    detail = {"time": ts, "evidence": str(ev.relative_to(finding_dir)), "requests": results}
+    if fails:
+        return RESULT["fail"], "did not reproduce: " + " | ".join(fails), detail
+    return RESULT["pass"], (f"reproduced: {len(results)} request(s) matched their oracle "
+                            f"→ evidence/{ev.name}"), detail
+
+
+def load_replay(finding_dir):
+    p = finding_dir / "replay.json"
+    if not p.exists():
+        return None
+    try:
+        spec = json.loads(p.read_text())
+        return spec if isinstance(spec, dict) else "top level must be an object"
+    except ValueError as e:
+        return str(e)
 
 
 # ── Runner ────────────────────────────────────────────────────────────────────
@@ -321,12 +578,14 @@ ICONS = {RESULT["pass"]: "✓", RESULT["fail"]: "✗",
          RESULT["warn"]: "⚠", RESULT["skip"]: "–"}
 LABELS = {RESULT["pass"]: "PASS", RESULT["fail"]: "FAIL",
           RESULT["warn"]: "WARN", RESULT["skip"]: "SKIP"}
+VERDICTS = ("validated", "unverified", "rejected")
 
-def run_checks(finding_dir, strict=False):
-    """Run all 5 checks. Returns (overall_pass, results_dict)."""
+
+def run_checks(finding_dir, strict=False, opts=None):
+    """Run all checks. Returns (verdict, results, info, replay_detail)."""
+    opts = opts or {}
     finding_dir = Path(finding_dir).resolve()
-    desc_path   = finding_dir / "description.md"
-
+    desc_path = finding_dir / "description.md"
     if not finding_dir.exists():
         print(f"[ERROR] Finding directory not found: {finding_dir}", file=sys.stderr)
         sys.exit(2)
@@ -334,111 +593,126 @@ def run_checks(finding_dir, strict=False):
         print(f"[ERROR] description.md not found in {finding_dir}", file=sys.stderr)
         sys.exit(2)
 
-    # Infer OUTPUT_DIR: finding_dir → findings/ → OUTPUT_DIR
     output_dir = finding_dir.parent.parent
-
-    info    = parse_description(desc_path)
-    fid     = finding_dir.name
-    width   = 68
-
+    info = parse_description(desc_path)
+    replay_spec = load_replay(finding_dir)
+    fid, width = finding_dir.name, 68
     print(f"\n{'─' * width}")
     print(f"  Validating: {fid}")
     print(f"  Title:      {info['title'][:60]}")
     print(f"  Severity:   {info['severity']}   CVSS: {info['cvss_score']}")
     print(f"{'─' * width}")
 
+    replay_detail = {}
+
+    def _replay():
+        outcome, reason, detail = check_replay(finding_dir, output_dir, info, replay_spec, opts)
+        replay_detail.update(detail)
+        return outcome, reason
+
     checks = [
-        ("cvss_consistency",  "CVSS Consistency",
-         lambda: check_cvss_consistency(info)),
-        ("evidence_exists",   "Evidence Exists",
-         lambda: check_evidence_exists(finding_dir)),
-        ("poc_validity",      "PoC Validity",
-         lambda: check_poc_validity(finding_dir, info)),
-        ("claims_vs_evidence","Claims vs Evidence",
+        ("cvss_consistency", "CVSS Consistency", lambda: check_cvss_consistency(info)),
+        ("evidence_exists", "Evidence Exists", lambda: check_evidence_exists(finding_dir)),
+        ("poc_validity", "PoC Validity", lambda: check_poc_validity(finding_dir, info)),
+        ("claims_vs_evidence", "Claims vs Evidence",
          lambda: check_claims_vs_evidence(finding_dir, info)),
         ("log_corroboration", "Log Corroboration",
-         lambda: check_log_corroboration(finding_dir, output_dir, info)),
+         lambda: check_log_corroboration(finding_dir, output_dir, info,
+                                         replay_spec if isinstance(replay_spec, dict) else None)),
+        ("replay", "Independent Replay", _replay),
     ]
-
     results = {}
     for i, (key, label, fn) in enumerate(checks, 1):
         outcome, reason = fn()
         results[key] = {"result": outcome, "reason": reason}
-        icon = ICONS[outcome]
-        tag  = LABELS[outcome]
-        print(f"  {icon} Check {i}: {label:<22}  [{tag}]")
-        # Show reason for non-pass outcomes
+        print(f"  {ICONS[outcome]} Check {i}: {label:<22}  [{LABELS[outcome]}]")
         if outcome != RESULT["pass"]:
-            wrapped = re.sub(r'(.{1,62})(\s|$)', r'    \1\n', reason).rstrip()
-            print(wrapped)
-
+            print(re.sub(r'(.{1,62})(\s|$)', r'    \1\n', reason).rstrip())
     print(f"{'─' * width}")
 
-    # Overall: warn counts as pass unless --strict
     failures = [k for k, v in results.items()
-                if v["result"] == RESULT["fail"] or
-                   (strict and v["result"] == RESULT["warn"])]
-
-    overall_pass = len(failures) == 0
-    status_label = "VALIDATED" if overall_pass else "REJECTED"
-    status_icon  = "✓" if overall_pass else "✗"
-    print(f"  {status_icon} Overall: {status_label}"
-          + (f"  (failed: {', '.join(failures)})" if failures else ""))
+                if v["result"] == RESULT["fail"] or (strict and v["result"] == RESULT["warn"])]
+    if failures:
+        verdict = "rejected"
+    elif results["replay"]["result"] != RESULT["pass"]:
+        verdict = "unverified"
+    else:
+        verdict = "validated"
+    icon = {"validated": "✓", "unverified": "?", "rejected": "✗"}[verdict]
+    extra = f"  (failed: {', '.join(failures)})" if failures else \
+        ("  (format checks pass, but the finding was not reproduced)" if verdict == "unverified" else "")
+    print(f"  {icon} Overall: {verdict.upper()}{extra}")
     print(f"{'─' * width}\n")
+    return verdict, results, info, replay_detail
 
-    return overall_pass, results, info
 
-
-def write_result(finding_dir, overall_pass, results, info):
-    output_dir = Path(finding_dir).resolve().parent.parent
-    fid        = Path(finding_dir).name
-
+def write_result(finding_dir, verdict, results, info, replay_detail=None):
+    finding_dir = Path(finding_dir).resolve()
+    output_dir, fid = finding_dir.parent.parent, finding_dir.name
     payload = {
         "finding_id": fid,
-        "title":      info["title"],
-        "severity":   info["severity"],
+        "title": info["title"],
+        "severity": info["severity"],
         "cvss_score": info["cvss_score"],
-        "validated":  overall_pass,
-        "timestamp":  datetime.now(timezone.utc).isoformat(),
+        "verdict": verdict,
+        "validated": verdict == "validated",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "checks": {k: v["result"] for k, v in results.items()},
-        "notes":  {k: v["reason"]  for k, v in results.items()
-                   if v["result"] != RESULT["pass"]},
+        "notes": {k: v["reason"] for k, v in results.items() if v["result"] != RESULT["pass"]},
+        "replay": replay_detail or None,
     }
-
-    if overall_pass:
-        out_dir  = output_dir / "artifacts" / "validated"
-        out_file = out_dir / f"{fid}.json"
-    else:
-        out_dir  = output_dir / "artifacts" / "false-positives"
-        failed   = next(k for k, v in results.items()
-                        if v["result"] == RESULT["fail"])
+    if verdict == "rejected":
+        failed = next(k for k, v in results.items() if v["result"] in (RESULT["fail"], RESULT["warn"]))
         payload["failed_check"] = failed
-        payload["reason"]       = results[failed]["reason"]
-        out_file = out_dir / f"{fid}-rejected.json"
+        payload["reason"] = results[failed]["reason"]
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_file.write_text(json.dumps(payload, indent=2))
-    tag = "validated" if overall_pass else "false-positives"
-    print(f"  → Written to artifacts/{tag}/{out_file.name}")
+    targets = {
+        "validated": output_dir / "artifacts" / "validated" / f"{fid}.json",
+        "unverified": output_dir / "artifacts" / "unverified" / f"{fid}.json",
+        "rejected": output_dir / "artifacts" / "false-positives" / f"{fid}-rejected.json",
+    }
+    # Exactly one current verdict per finding: remove stale results from earlier runs.
+    for v, path in targets.items():
+        if v != verdict and path.exists():
+            path.unlink()
+    out = targets[verdict]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2))
+    print(f"  → Written to {out.relative_to(output_dir)}")
+    return out
 
-    return out_file
+
+def read_verdicts(output_dir):
+    """Map finding_id → verdict from artifacts/ (legacy validated files without replay → unverified)."""
+    output_dir = Path(output_dir)
+    out = {}
+    for sub, verdict in (("false-positives", "rejected"), ("unverified", "unverified"),
+                         ("validated", "validated")):
+        for p in sorted((output_dir / "artifacts" / sub).glob("*.json")):
+            try:
+                d = json.loads(p.read_text())
+            except ValueError:
+                continue
+            fid = d.get("finding_id") or p.stem.replace("-rejected", "")
+            v = d.get("verdict") or verdict
+            if v == "validated" and not (d.get("replay") or {}).get("requests"):
+                v = "unverified"                 # pre-replay "validated" = format checks only
+            out[fid] = v
+    return out
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 def main():
-    args   = sys.argv[1:]
-    strict = "--strict" in args
-    run_all = "--all" in args
-    paths  = [a for a in args if not a.startswith("--")]
-
+    args = sys.argv[1:]
+    strict, run_all = "--strict" in args, "--all" in args
+    opts = {"no_replay": "--no-replay" in args, "replay_writes": "--replay-writes" in args}
+    paths = [a for a in args if not a.startswith("--")]
     if not paths:
         print(__doc__)
         sys.exit(2)
-
     target = Path(paths[0]).resolve()
 
     if run_all:
-        # Validate every finding under OUTPUT_DIR/findings/
         findings_dir = target / "findings"
         if not findings_dir.exists():
             print(f"[ERROR] No findings/ directory under {target}", file=sys.stderr)
@@ -448,27 +722,24 @@ def main():
         if not dirs:
             print(f"[INFO] No findings with description.md found in {findings_dir}")
             sys.exit(0)
-
-        all_pass = True
+        counts = {v: 0 for v in VERDICTS}
         for d in dirs:
-            ok, results, info = run_checks(d, strict=strict)
-            write_result(d, ok, results, info)
-            if not ok:
-                all_pass = False
-
+            verdict, results, info, detail = run_checks(d, strict=strict, opts=opts)
+            write_result(d, verdict, results, info, detail)
+            counts[verdict] += 1
         print(f"\n{'═' * 68}")
-        total = len(dirs)
-        passed = sum(1 for d in dirs
-                     if (target / "artifacts" / "validated" / f"{d.name}.json").exists())
-        print(f"  Results: {passed}/{total} findings validated")
+        print(f"  Results: {counts['validated']} validated (reproduced) · "
+              f"{counts['unverified']} unverified · {counts['rejected']} rejected  "
+              f"of {len(dirs)}")
+        if counts["unverified"]:
+            print("  Unverified findings are excluded from the report unless you pass "
+                  "--include-unverified to generate-report.py.")
         print(f"{'═' * 68}\n")
-        sys.exit(0 if all_pass else 1)
+        sys.exit(0 if counts["validated"] == len(dirs) else 1)
 
-    else:
-        # Single finding
-        ok, results, info = run_checks(target, strict=strict)
-        write_result(target, ok, results, info)
-        sys.exit(0 if ok else 1)
+    verdict, results, info, detail = run_checks(target, strict=strict, opts=opts)
+    write_result(target, verdict, results, info, detail)
+    sys.exit(0 if verdict == "validated" else 1)
 
 
 if __name__ == "__main__":

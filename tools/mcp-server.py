@@ -520,6 +520,12 @@ def tool_scope_check(args):
     )
     if r.returncode == 2:
         return f"BLOCKED: {r.stderr.strip()}", True  # is_error=True signals the command was rejected
+    try:
+        out = json.loads(r.stdout or "{}").get("hookSpecificOutput", {})
+    except ValueError:
+        out = {}
+    if out.get("permissionDecision") == "ask":
+        return f"NEEDS HUMAN APPROVAL: {out.get('permissionDecisionReason', '')}", False
     return "ALLOWED", False
 
 

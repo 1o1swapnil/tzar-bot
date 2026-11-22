@@ -171,6 +171,9 @@ def main():
                     help="Comma-separated in-scope domains/IPs (supports *.x, CIDR, re:)")
     ap.add_argument("--out-of-scope", default="",
                     help="Comma-separated out-of-scope rules (deny wins over in-scope)")
+    ap.add_argument("--write-policy", default="ask", choices=["ask", "deny", "allow"],
+                    help="State-changing requests: ask = human approves each (default), "
+                         "deny = read-only engagement, allow = lab/CTF only")
     args = ap.parse_args()
 
     eng_type = args.type or detect_type_from_target(args.target)
@@ -209,6 +212,8 @@ def main():
         "scope":        in_scope_list,        # legacy key (kept for back-compat)
         "in_scope":     in_scope_list,        # canonical key read by scope.py
         "out_of_scope": out_of_scope_list,    # deny-wins rules enforced in code
+        "write_policy": args.write_policy,    # ask / deny / allow — enforced by tools/write_gate.py
+        "write_allow":  [],                   # human-approved "METHOD URL-GLOB" rules
         "started":      started,
         "output_dir":   str(output_dir),
         "tester":       "Swapnil Khandekar",

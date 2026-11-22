@@ -3,12 +3,13 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|WebFetch|mcp__burp__.*|mcp__playwright__.*",
+        "matcher": "^(Bash|WebFetch|Edit|Write|MultiEdit|NotebookEdit|mcp__burp__.*|mcp__playwright__.*)$",
         "hooks": [
           {
             "type": "command",
             "command": "python3 /home/kali/Documents/tzar-bot/tools/scope-check.py",
-            "timeout": 5
+            "timeout": 10,
+            "onFailure": "block"
           }
         ]
       }

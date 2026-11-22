@@ -14,6 +14,14 @@ What is checked
   WebFetch           deny-list only: research fetches to unrelated sites are allowed,
                      hosts matching an out-of-scope rule are blocked.
 
+Write gate (tools/write_gate.py)
+  The same pass records state-changing requests (PUT/PATCH/DELETE, non-auth POSTs, GraphQL
+  mutations, destructive paths, risky sqlmap, PoC .post()/fetch, Burp send_*, Playwright
+  clicks on Delete/Submit-style controls) and changes to trust anchors (engagement.json,
+  .tzar/, config/*, this hook, write_gate.py, .claude/settings*.json). Per engagement
+  write_policy: ask → permissionDecision "ask" (the human approves at the prompt),
+  deny → exit 2, allow → pass. Trust-anchor changes always ask.
+
 Scope source (first that exists wins)
   1. $OUTPUT_DIR/engagement.json     (hook-process env; mostly tests / MCP scope_check)
   2. .tzar/active-engagement         (pointer written by init-engagement.py /
@@ -56,6 +64,7 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
 from scope import Scope, _match, read_active  # noqa: E402  — code-enforced scope authority
+import write_gate  # noqa: E402  — write-request policy (allow / ask / deny)
 
 REPO_DIR = Path(__file__).parent.parent.resolve()
 TOOLS_DIR = REPO_DIR / "tools"
@@ -216,6 +225,68 @@ LOCAL_COMMANDS = {
 FEEDERS = {"echo", "printf", "cat", "tac", "head", "tail", "sort", "uniq"}
 # Repo tools that do send target traffic (everything else under tools/ is local).
 TRAFFIC_REPO_TOOLS = {"burp-playwright-capture.py", "continuous-scan.py"}
+
+# ── Write-request detection ──────────────────────────────────────────────────
+HTTP_CLIENTS = {"curl", "wget", "http", "https", "xh", "ffuf", "wfuzz", "sqlmap", "ghauri",
+                "feroxbuster", "dirsearch", "commix", "dalfox", "arjun", "kr", "kiterunner"}
+METHOD_FLAGS = {"-X", "--request", "--method", "-method"}
+BODY_FLAGS = {"-d", "--data", "--data-raw", "--data-binary", "--data-urlencode", "--json",
+              "-F", "--form", "--form-string", "--post-data", "--post-file", "--body-data",
+              "--body-file", "--body", "-body"}
+HTTP_VALUE_FLAGS = {"-e", "--referer", "-x", "--proxy", "-o", "--output", "-O", "-H",
+                    "--header", "-A", "--user-agent", "-b", "--cookie", "-c", "--cookie-jar",
+                    "-w", "--write-out", "-u", "--user", "-r", "--range", "-m", "--max-time",
+                    "--resolve", "--connect-to", "-K", "--config", "-E", "--cert", "--key",
+                    "--cacert", "-U", "--level", "--risk", "--technique", "-p", "--dbms",
+                    "--tamper", "--threads", "-t", "-mc", "-fc", "-fs", "-fw", "-fl", "-ms",
+                    "-mr", "-fr", "-rate", "--rate", "-wordlist"}
+WRITE_CALL = re.compile(
+    r"""\.(?P<m>post|put|patch|delete)\s*\(\s*(?:url\s*=\s*)?(?:f?(?P<q>['"`])(?P<u>[^'"`]*)(?P=q))?""",
+    re.I)
+REQ_CALL = re.compile(
+    r"""\.request\s*\(\s*(?P<q>['"])(?P<m>[A-Za-z]+)(?P=q)\s*,\s*(?:f?(?P<q2>['"])(?P<u>[^'"]*)(?P=q2))?""")
+METHOD_KW = re.compile(r"""(?i)\bmethod\s*[:=]\s*(?P<q>['"])(?P<m>POST|PUT|PATCH|DELETE)(?P=q)""")
+UI_WRITE_WORDS = re.compile(
+    r"(?i)\b(delete|remove|destroy|deactivate|disable|cancel|terminate|revoke|reset|"
+    r"unsubscribe|archive|submit|save|update|confirm|pay|purchase|buy|checkout|transfer|"
+    r"send|publish|approve|reject|create|invite|upgrade|downgrade|subscribe)\b")
+
+# ── Trust anchors: changing these changes what the gate enforces → human approval ──
+PROTECTED = re.compile(
+    r"(?:^|[\s/'\"=])(?:[\w./-]*/)?(?:engagement\.json|\.tzar/[\w.-]*|config/allowed-hosts\.txt|"
+    r"config/safe-prefixes\.txt|tools/scope-check\.py|tools/scope\.py|tools/write_gate\.py|"
+    r"\.claude/settings(?:\.local)?\.json)")
+CODE_FILE_WRITE = re.compile(
+    r"write_text|write_bytes|open\([^)]*['\"][wax]\+?['\"]|\.write\(|json\.dump\(|shutil\.|"
+    r"os\.(?:replace|rename|remove|unlink)|\.unlink\(|\.rename\(|writeFileSync|writeFile\(")
+PROTECTED_REDIRECT = re.compile(
+    r">{1,2}\s*['\"]?[^\s'\"]*(?:engagement\.json|\.tzar/|allowed-hosts\.txt|safe-prefixes\.txt|"
+    r"scope-check\.py|scope\.py|write_gate\.py|settings(?:\.local)?\.json)")
+READONLY_TOOLS = {"cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg", "jq",
+                  "wc", "ls", "stat", "diff", "cmp", "file", "sed", "awk", "gawk", "sha256sum",
+                  "md5sum", "realpath", "readlink", "test", "[", "echo", "printf", "perl"}
+READONLY_REPO_TOOLS = {"scope.py", "validate-finding.py", "generate-report.py",
+                       "engagement-state.py", "report-export.py", "session-memory.py",
+                       "continuous-scan.py", "token-meter.py", "memory-search.py",
+                       "write_gate.py", "scope-check.py"}
+
+
+def _summarise_init(args):
+    want = {"--target": "target", "--scope": "in", "--out-of-scope": "out",
+            "--write-policy": "write-policy", "--type": "type", "--project": "project"}
+    out, i = [], 0
+    while i < len(args):
+        flag, _, att = args[i].partition("=")
+        if flag in want:
+            val = att or (args[i + 1] if i + 1 < len(args) else "")
+            out.append(f"{want[flag]}={val}")
+            i += 1 if att else 2
+            continue
+        i += 1
+    if not any(o.startswith("write-policy=") for o in out):
+        out.append("write-policy=ask")
+    return ", ".join(out)
+
 
 ASSIGN = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.S)
 HOSTNAME = re.compile(
@@ -621,6 +692,8 @@ class Checker:
         self.heredocs = []
         self._missing_files = []
         self._xargs = False
+        self.writes = []      # write_gate.WriteOp — state-changing requests seen
+        self.guards = []      # changes to scope / write policy that need a human
 
     # -- verdicts --
     def _denied(self, host: str) -> bool:
@@ -835,6 +908,7 @@ class Checker:
         tool = Path(tool_path).name.lower()
         args = [x for t in tokens[1:] for x in self.expand(t)]
         where = f"`{tool}`"
+        self._guard_segment(tool, args, seg)
 
         # here-string / stdin redirection count as stdin feed
         if herestr is not None:
@@ -1143,6 +1217,152 @@ class Checker:
             for w in feed:
                 self.judge(target_of(w, self.cwd), f"{where} (stdin)")
         self._xargs = False
+        if tool in HTTP_CLIENTS:
+            self._record_http_writes(tool, args)
+
+    # -- write-request detection (feeds tools/write_gate.py) --
+    def _record_http_writes(self, tool, args):
+        where = f"`{tool}`"
+        method, bodies, urls, force_get = None, [], [], False
+        i = 0
+        while i < len(args):
+            a = args[i]
+            nxt = args[i + 1] if i + 1 < len(args) else None
+            flag, _, att = a.partition("=") if a.startswith("--") else (a, "", "")
+            val = att or nxt
+            step = 1 if att else 2
+            if flag in METHOD_FLAGS and val:
+                method = val.upper()
+                i += step
+                continue
+            if re.fullmatch(r"-X[A-Za-z]+", a):
+                method = a[2:].upper()
+                i += 1
+                continue
+            if flag in BODY_FLAGS and val is not None:
+                bodies.append(val)
+                i += step
+                continue
+            if tool == "curl" and flag in ("-T", "--upload-file"):
+                method = method or "PUT"
+                i += step
+                continue
+            if tool == "curl" and flag in ("-I", "--head"):
+                method = method or "HEAD"
+                i += 1
+                continue
+            if tool == "curl" and flag in ("-G", "--get"):
+                force_get = True
+                i += 1
+                continue
+            if flag in ("-u", "--url", "-url", "-target") and tool != "curl" and val:
+                urls.append(val)
+                i += step
+                continue
+            if flag == "--url" and val:
+                urls.append(val)
+                i += step
+                continue
+            if flag in HTTP_VALUE_FLAGS:
+                i += step
+                continue
+            if a.startswith("-"):
+                i += 1
+                continue
+            if tool in ("http", "https", "xh") and method is None and re.fullmatch(r"[A-Z]+", a):
+                method = a
+            elif tool in ("http", "https", "xh") and "://" not in a and \
+                    re.match(r"^[^=:/\s]+(?::=|=|@)", a) and not re.match(r"^[^=]+==", a):
+                bodies.append(a)                  # httpie data item → POST
+            else:
+                t = target_of(a, self.cwd)
+                if t is not None and t.kind in ("host", "ip"):
+                    urls.append(a)
+            i += 1
+        if force_get:
+            method = method or "GET"
+        method = method or ("POST" if bodies else "GET")
+        body = " ".join(bodies)
+        for u in urls:
+            u = u if "://" in u else f"http://{u}"
+            op = write_gate.classify(method, u, body, where)
+            if op:
+                self.writes.append(op)
+        if tool in ("sqlmap", "ghauri"):
+            self._record_sqlmap(args, urls, where)
+
+    def _record_sqlmap(self, args, urls, where):
+        joined = " ".join(args)
+        risky = []
+        m = re.search(r"--risk[ =](\d)", joined)
+        if m and int(m.group(1)) >= 3:
+            risky.append("--risk 3 (OR-based payloads can UPDATE/DELETE every row)")
+        m = re.search(r"--technique[ =](\S+)", joined)
+        if m and "S" in m.group(1).upper():
+            risky.append("stacked queries")
+        for f in ("--sql-shell", "--os-shell", "--os-cmd", "--os-pwn", "--file-write",
+                  "--file-dest", "--eval", "--reg-add", "--reg-del", "--udf-inject"):
+            if f in args or any(a.startswith(f + "=") for a in args):
+                risky.append(f)
+        m = re.search(r"--sql-query[ =]['\"]?\s*(\w+)", joined)
+        if m and m.group(1).lower() not in ("select", "show", "describe", "explain"):
+            risky.append(f"--sql-query {m.group(1).upper()}")
+        if risky:
+            url = urls[0] if urls else ""
+            self.writes.append(write_gate.WriteOp(
+                "SQLI", url, where, "sqlmap " + ", ".join(risky), destructive=True))
+
+    def _record_code_writes(self, code, where):
+        for m in WRITE_CALL.finditer(code):
+            self._code_write(m.group("m"), m.group("u"), code, where)
+        for m in REQ_CALL.finditer(code):
+            self._code_write(m.group("m"), m.group("u"), code, where)
+        for m in METHOD_KW.finditer(code):
+            self._code_write(m.group("m"), None, code, where)
+        if re.search(r"\.submit\(\s*\)|requestSubmit\(", code):
+            self._code_write("POST", None, code, where, "form submit")
+
+    def _code_write(self, method, url, code, where, reason=None):
+        op = write_gate.classify(method, url or "", code, where)
+        if op:
+            if reason:
+                op.reason = reason
+            if not any(o.method == op.method and o.url == op.url and o.where == where
+                       for o in self.writes):
+                self.writes.append(op)
+
+    # -- trust anchors: scope / write-policy changes need a human --
+    def _guard_segment(self, tool, args, seg):
+        script = None
+        if INTERPRETERS.match(tool):
+            if any(a in CODE_FLAGS for a in args) or "-" in args or not args:
+                return                 # inline code / heredoc: check_code() checks real writes
+            script = next((a for a in args if not a.startswith("-")), None)
+        name = Path(script).name if script else tool
+        sub = [a for a in args if a != script]
+        if name == "init-engagement.py":
+            self.guards.append("starts a new engagement and sets the enforced scope: "
+                               + _summarise_init(sub))
+            return
+        if name == "scope.py" and "--activate" in sub:
+            i = sub.index("--activate")
+            self.guards.append("switches the enforced scope to engagement "
+                               + (sub[i + 1] if i + 1 < len(sub) else "?"))
+            return
+        if name == "write_gate.py" and any(c in sub for c in ("allow", "revoke", "policy")):
+            self.guards.append("changes the write policy: " + " ".join(sub))
+            return
+        if not PROTECTED.search(seg):
+            return
+        if tool in READONLY_TOOLS and not PROTECTED_REDIRECT.search(seg) and \
+                not (tool in ("sed", "perl") and any(a.startswith("-i") for a in args)):
+            return
+        if tool == "git" and args and args[0] in ("diff", "log", "show", "status", "add",
+                                                  "commit", "blame", "grep", "push", "fetch"):
+            return
+        if script and Path(script).name in READONLY_REPO_TOOLS:
+            return
+        self.guards.append(f"modifies a scope / write-policy file: `{seg.strip()[:160]}`")
 
     # -- inline / script code --
     URL_LIT = re.compile(r"""(?P<q>['"`])(?P<s>[A-Za-z][A-Za-z0-9+.-]*://[^'"`\s]*)(?P=q)""")
@@ -1179,6 +1399,9 @@ class Checker:
             self.judge(target_of(url, self.cwd), where)
         for m in self.HOST_CALL.finditer(code):
             self.judge(target_of(m.group("h"), self.cwd), where)
+        self._record_code_writes(code, where)
+        if PROTECTED.search(code) and CODE_FILE_WRITE.search(code):
+            self.guards.append(f"{where} code writes to a scope / write-policy file")
 
     # -- MCP tools --
     def check_mcp(self, tool_name: str, tool_input: dict):
@@ -1202,6 +1425,7 @@ class Checker:
                     for k, v in hdrs.items():
                         if k.lower() in ("host", ":authority"):
                             self.judge(target_of(str(v), self.cwd), f"{where} {k}", "deny")
+            self._record_burp_write(name, tool_input)
             return
         if name.startswith("mcp__playwright__"):
             for k, v in tool_input.items():
@@ -1211,7 +1435,44 @@ class Checker:
                     self.judge(target_of(v, self.cwd), f"{tool_name} {k}")
                 elif name.endswith(("evaluate", "evaluate_js")) or k in ("script", "expression"):
                     self.check_code(v, f"{tool_name} {k}")
+            if name.endswith(("_click", "_press", "_type", "_fill")):
+                text = " ".join(str(v) for v in tool_input.values() if isinstance(v, str))
+                m = UI_WRITE_WORDS.search(text)
+                if m and (name.endswith("_click") or "enter" in text.lower()
+                          or name.endswith("_press")):
+                    self.writes.append(write_gate.WriteOp(
+                        "UI", "", tool_name, f"browser action on a '{m.group(0)}' control",
+                        destructive=bool(write_gate.DESTRUCTIVE_PATH.search("/" + m.group(0)))))
             return
+
+    def _record_burp_write(self, name, ti):
+        if name == "mcp__burp__set_task_execution_engine_state":
+            if ti.get("running") in (True, "true", "True"):
+                self.writes.append(write_gate.WriteOp(
+                    "SCAN", "", name, "resumes Burp scanner tasks (active scans send writes)"))
+            return
+        if name not in ("mcp__burp__send_http1_request", "mcp__burp__send_http2_request"):
+            return
+        host = str(ti.get("targetHostname") or "")
+        port = ti.get("targetPort")
+        scheme = "https" if ti.get("usesHttps") in (True, "true", "True") else "http"
+        default = 443 if scheme == "https" else 80
+        hostport = host if port in (None, "", default, str(default)) else f"{host}:{port}"
+        if name == "mcp__burp__send_http1_request":
+            content = str(ti.get("content") or "")
+            m = re.match(r"\s*([A-Za-z]+)\s+(\S+)", content)
+            method, target = (m.group(1), m.group(2)) if m else ("GET", "/")
+            parts = re.split(r"\r?\n\r?\n", content, maxsplit=1)
+            body = parts[1] if len(parts) > 1 else ""
+        else:
+            ph = ti.get("pseudoHeaders") or {}
+            method = str(ph.get(":method", "GET"))
+            target = str(ph.get(":path", "/"))
+            body = str(ti.get("requestBody") or "")
+        url = target if "://" in target else f"{scheme}://{hostport}{target}"
+        op = write_gate.classify(method, url, body, name)
+        if op:
+            self.writes.append(op)
 
 
 # ── Back-compat API (MCP scope_check + tests) ────────────────────────────────
@@ -1239,6 +1500,12 @@ def main():
         sys.exit(0)
     is_bash = tool_name == "Bash"
     is_mcp = tool_name == "WebFetch" or tool_name.startswith(("mcp__burp__", "mcp__playwright__"))
+    if tool_name in EDIT_TOOLS:
+        path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
+        if PROTECTED.search(" " + path):
+            emit_ask([f"POLICY: {tool_name} of `{path}` changes what the scope / write gate "
+                      f"enforces."], None)
+        sys.exit(0)
     if not (is_bash or is_mcp):
         sys.exit(0)
     command = tool_input.get("command", "") if is_bash else ""
@@ -1269,6 +1536,42 @@ def main():
                 "engagement with `python3 tools/scope.py --activate <OUTPUT_DIR>`).\n",
               file=sys.stderr)
         sys.exit(2)
+
+    # ── write gate ──
+    meta = write_gate.load_meta(output_dir)
+    decision, pending = write_gate.decide(checker.writes, meta)
+    if decision == "deny":
+        print("\n[WRITE BLOCKED] engagement write_policy is 'deny' (read-only engagement)\n"
+              + "\n".join(f"  - {op.label()}" for op in pending[:8])
+              + "\nDocument the request in the finding instead of sending it, or ask the "
+                "operator to pre-approve it: python3 tools/write_gate.py allow "
+                "\"METHOD URL-GLOB\" --reason \"...\"\n", file=sys.stderr)
+        sys.exit(2)
+    reasons = [f"WRITE: {op.label()}" for op in pending] + \
+              [f"POLICY: {g}" for g in checker.guards]
+    if reasons:
+        emit_ask(reasons, output_dir, meta)
+    sys.exit(0)
+
+
+EDIT_TOOLS = {"Edit", "Write", "NotebookEdit", "MultiEdit"}
+
+
+def emit_ask(reasons, output_dir, meta=None):
+    """Hand the call to the human permission prompt. The model cannot answer it."""
+    head = "tzar-bot write gate — human approval required"
+    if output_dir:
+        head += f" (engagement {Path(output_dir).name}, write_policy="
+        head += f"{(meta or {}).get('write_policy', 'ask')})"
+    body = "\n".join(f"• {r}" for r in reasons[:8])
+    tail = ("\nApprove only if the client agreed to this change and you know how to undo it. "
+            "To pre-approve a repeatable write: python3 tools/write_gate.py allow "
+            "\"METHOD URL-GLOB\" --reason \"...\"")
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "ask",
+        "permissionDecisionReason": f"{head}\n{body}{tail if any(r.startswith('WRITE') for r in reasons) else ''}",
+    }}))
     sys.exit(0)
 
 

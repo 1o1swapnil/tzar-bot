@@ -2,7 +2,7 @@
 
 AI-powered pentesting bot running on Claude Code + Kali Linux. Autonomous multi-agent system with coordinator, executor, and validator agents.
 
-> ⚠️ **Authorized use only.** Tzar-Bot is for security testing you are *explicitly authorized* to perform — pentests, vulnerability assessments, CTFs, and bug-bounty programs within their declared scope. All activity is designed to be non-destructive. You are solely responsible for ensuring you have permission to test any target. Scope is enforced in code (`tools/scope.py` + the `scope-check.py` PreToolUse hook) — out-of-scope commands are blocked before they run.
+> ⚠️ **Authorized use only.** Tzar-Bot is for security testing you are *explicitly authorized* to perform — pentests, vulnerability assessments, CTFs, and bug-bounty programs within their declared scope. All activity is designed to be non-destructive. You are solely responsible for ensuring you have permission to test any target. Scope is enforced in code (`tools/scope.py` + the `scope-check.py` PreToolUse hook) — out-of-scope traffic (Bash, Burp/Playwright MCP, WebFetch) is blocked before it runs.
 
 ## Requirements
 
@@ -119,7 +119,7 @@ Python utilities the agents drive (stdlib-first; 15 are also exposed model-agnos
 |------|---------|
 | `init-engagement.py` | Create the typed engagement tree + export `$OUTPUT_DIR` |
 | `engagement-state.py` | Resumable, scope-guarded ledger; **executor work-claim dedup** (`claim`/`release`/`worklist --agent`) |
-| `scope.py` · `scope-check.py` | Code-enforced scope (deny-wins); PreToolUse block hook (allow-list extensible via `config/safe-prefixes.txt`) |
+| `scope.py` · `scope-check.py` | Code-enforced scope (deny-wins, fail-closed); PreToolUse block hook on Bash + Burp/Playwright MCP + WebFetch; active engagement via `scope.py --activate` (config: `config/allowed-hosts.txt`, `config/safe-prefixes.txt`) |
 | `validate-finding.py` | 5-check mechanical finding-validation gate |
 | `generate-report.py` | Canonical tzar-bot-style **PDF** report |
 | `report-export.py` | **NEW** — offline **JSON + HTML** report export (no reportlab, no network) |

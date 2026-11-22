@@ -1,14 +1,15 @@
 # config/safe-prefixes.txt — operator-maintained allow-list for scope-check.py
 #
-# Commands whose stripped form starts with any prefix below skip the scope check
-# entirely (they are local/tooling commands, not target network traffic).
+# Command SEGMENTS whose stripped form starts with any prefix below skip the scope
+# check. The command line is split on ; && || | & newlines and substitutions first,
+# so `trufflehog x; curl evil.com` still has its curl segment checked.
 #
-# These are MERGED ON TOP of the built-in defaults in tools/scope-check.py — this
-# file only adds; it never removes a built-in. Edit here instead of the hook so the
-# allow-list can change without touching code. Missing file = built-ins only.
+# Local commands (echo, cat, grep, git status, ...) are already recognised by
+# tools/scope-check.py; use this file only for tools you trust to never reach an
+# out-of-scope host. Prefer config/allowed-hosts.txt when the issue is a host.
 #
 # Rules:
-#   - one prefix per line; matched with str.startswith() against the stripped command
+#   - one prefix per line; matched with str.startswith() against each stripped segment
 #   - lines starting with '#' and blank lines are ignored
 #   - a trailing space is significant ("nmap " won't match "nmaplike")
 #

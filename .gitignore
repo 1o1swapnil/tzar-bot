@@ -1,5 +1,6 @@
 # Engagement data — may contain sensitive recon/credential material
 memory.db
+memory.db-*
 
 # Python
 __pycache__/
@@ -28,3 +29,6 @@ BugBounty/*/
 
 # Local Claude Code settings (may contain command history / tokens)
 .claude/settings.local.json
+
+# Active-engagement pointer for the scope-check hook (local state)
+.tzar/

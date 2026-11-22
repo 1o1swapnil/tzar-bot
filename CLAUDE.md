@@ -95,7 +95,7 @@ Skills live in `skills/` — each a `SKILL.md` plus a `reference/` folder. **Two
 
 ## Scope & State (code-enforced)
 
-Scope is enforced in **code**, not by trusting the model: `tools/scope.py` (deny-wins, default-deny, wildcard/CIDR/regex) is wired into the `scope-check.py` PreToolUse hook, so **out-of-scope `Bash` commands are blocked before they run**. Structured progress lives in the resumable, scope-guarded ledger `tools/engagement-state.py` (`state.json`), which also drops out-of-scope discoveries. Commands: `docs/operations.md`.
+Scope is enforced in **code**, not by trusting the model: `tools/scope.py` (deny-wins, default-deny, wildcard/CIDR/regex) is wired into the `scope-check.py` PreToolUse hook (Bash, Burp/Playwright MCP, WebFetch), so **out-of-scope traffic is blocked before it runs** — fail-closed: no active scope or a dynamic target (`$VAR`) blocks too. The hook enforces the engagement in `.tzar/active-engagement` (set by `init-engagement.py`; switch with `python3 tools/scope.py --activate <OUTPUT_DIR>`). Structured progress lives in the resumable, scope-guarded ledger `tools/engagement-state.py` (`state.json`), which also drops out-of-scope discoveries. Commands: `docs/operations.md`.
 
 ## Agent Architecture
 

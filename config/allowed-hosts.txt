@@ -1,0 +1,12 @@
+# config/allowed-hosts.txt — extra infrastructure hosts for scope-check.py
+#
+# Hosts listed here are never treated as targets (package mirrors, a private OAST /
+# interactsh server, an upstream proxy, ...). Merged onto the built-in INFRA_HOSTS.
+# Out-of-scope rules still win: a host here that matches an engagement's
+# out_of_scope list is blocked.
+#
+# Pattern syntax is the same as engagement scope: `example.com` = apex + subdomains,
+# `*.example.com` = subdomains only, CIDR, or `re:<regex>`. One per line.
+#
+# oast.mycompany.net
+# mirror.internal.example

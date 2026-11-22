@@ -24,13 +24,57 @@ CLI:
   python3 tools/scope.py --engagement WAPT/acme/TS/engagement.json https://api.acme.com
   python3 tools/scope.py --in-scope acme.com --out-of-scope admin.acme.com host.acme.com
   python3 tools/scope.py --selftest
+  python3 tools/scope.py --activate WAPT/acme/TS     # make an engagement the active scope
+  python3 tools/scope.py --active                    # show the active engagement + scope
+  python3 tools/scope.py --deactivate                # clear it (hook then blocks target traffic)
 """
 import argparse
 import ipaddress
 import json
+import os
 import re
 import sys
+from pathlib import Path
 from urllib.parse import urlparse
+
+REPO_DIR = Path(__file__).resolve().parent.parent
+
+
+# ── Active-engagement pointer ────────────────────────────────────────────────
+# The PreToolUse hook runs as a child of the Claude Code process, so it never sees
+# an OUTPUT_DIR exported inside a Bash tool shell. init-engagement.py therefore
+# records the active engagement in a pointer file the hook can always read.
+
+def pointer_path() -> Path:
+    return Path(os.environ.get("TZAR_ACTIVE_POINTER")
+                or (REPO_DIR / ".tzar" / "active-engagement"))
+
+
+def set_active(output_dir) -> Path:
+    od = Path(output_dir).resolve()
+    if not (od / "engagement.json").exists():
+        raise FileNotFoundError(f"{od}/engagement.json not found")
+    p = pointer_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(str(od) + "\n")
+    return od
+
+
+def clear_active() -> None:
+    try:
+        pointer_path().unlink()
+    except FileNotFoundError:
+        pass
+
+
+def read_active():
+    """Return the active OUTPUT_DIR (Path) from the pointer file, or None."""
+    p = pointer_path()
+    try:
+        od = Path(p.read_text().strip())
+    except OSError:
+        return None
+    return od if (od / "engagement.json").exists() else None
 
 
 def host_of(target: str) -> str:
@@ -154,10 +198,29 @@ def main():
     ap.add_argument("--in-scope", default=None, help="comma-separated in-scope rules")
     ap.add_argument("--out-of-scope", default=None, help="comma-separated out-of-scope rules")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--activate", metavar="OUTPUT_DIR",
+                    help="make this engagement the active scope for the scope-check hook")
+    ap.add_argument("--deactivate", action="store_true", help="clear the active engagement")
+    ap.add_argument("--active", action="store_true", help="print the active engagement")
     a = ap.parse_args()
 
     if a.selftest:
         _selftest(); return
+    if a.activate:
+        try:
+            od = set_active(a.activate)
+        except FileNotFoundError as e:
+            print(f"error: {e}", file=sys.stderr); sys.exit(2)
+        sc = Scope.load(od / "engagement.json")
+        print(f"active: {od}\n  in={sc.in_scope} out={sc.out_of_scope}"); return
+    if a.deactivate:
+        clear_active(); print("active engagement cleared"); return
+    if a.active:
+        od = read_active()
+        if not od:
+            print("no active engagement"); sys.exit(1)
+        sc = Scope.load(od / "engagement.json")
+        print(f"active: {od}\n  in={sc.in_scope} out={sc.out_of_scope}"); return
 
     if a.engagement:
         sc = Scope.load(a.engagement)

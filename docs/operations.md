@@ -49,12 +49,20 @@ Idempotent, grouped by installer, resilient (one failure never aborts). After fi
 
 Scope is enforced in **code** (not by trusting the model). Canonical authority: `tools/scope.py` — `Scope` class with deny-wins, default-deny, wildcard/CIDR/regex, suffix-confusion guard. Wired into two boundaries:
 
-- **`tools/scope-check.py`** — PreToolUse hook. Every `Bash` command's target hosts/IPs are checked through `Scope`; out-of-scope commands are **blocked (exit 2)** before they run. Infra/tooling hosts (GitHub, NVD, mirrors, localhost) and safe prefixes always allowed. The safe-prefix allow-list is the built-in defaults **plus** anything in `config/safe-prefixes.txt` (operator-editable; merge-only, never removes a default).
+- **`tools/scope-check.py`** — PreToolUse hook on `Bash|WebFetch|mcp__burp__.*|mcp__playwright__.*`; blocks (exit 2) before the call runs.
+  - **Bash:** every segment is checked (`;` `&&` `||` `|` `&` newlines, `$(…)`, backticks, `<(…)`, `bash -c`/`eval`, heredocs). Wrappers (`sudo`, `env`, `timeout`, `proxychains`, `xargs`, …), `ssh` remote commands, `-iL`/`-l` target files, hosts piped from `echo`/`cat` into stdin-reading tools, inline interpreter code (`python -c`, `node -e`, heredocs) and scripts the executors wrote are all checked.
+  - **Burp MCP:** `targetHostname` is default-deny; `Host` / `:authority` headers are checked against out-of-scope rules only (Host-header injection tests still work). **Playwright MCP:** URL arguments + URLs in evaluated JS. **WebFetch:** out-of-scope rules only (research fetches allowed).
+  - **Fail closed:** out-of-scope rules beat everything (including infra hosts); with **no active scope** any non-infra target is blocked; a network tool with a dynamic target (`$VAR`, `$(…)`) is blocked — use a literal or a `-iL`/`-l` file.
+  - **Scope source:** `$OUTPUT_DIR/engagement.json` → `.tzar/active-engagement` (written by `init-engagement.py`) → newest `active` engagement in `memory.db`. The hook can't see an `OUTPUT_DIR` exported in a Bash tool shell, which is why the pointer exists. Switch with `python3 tools/scope.py --activate <OUTPUT_DIR>` / `--active` / `--deactivate`.
+  - **Operator config:** `config/allowed-hosts.txt` (extra infra hosts, e.g. a private OAST server) and `config/safe-prefixes.txt` (per-segment skip).
+  - **Known limits** (static analysis can't close them — an egress proxy/firewall can): output of one network tool piped into another (`subfinder | httpx` — write to a file and use `-l`), hosts built at runtime inside third-party tools, DNS names that resolve to out-of-scope IPs, single-label hostnames. Regression corpus: `tools/tests/test_scope_hook.py`.
 - **`tools/engagement-state.py`** — resumable, scope-guarded ledger (`state.json` + `logs/engine.log` under `$OUTPUT_DIR`): surface / worklist / tested / candidates / confirmed / **claims**. Drops out-of-scope discoveries in code. Survives context compaction; auditable and resumable. Vuln-class ranking normalises aliases/verbose names (`sql-injection`→`sqli`, `remote-code-execution`→`rce`); unknown classes get a default weight (kept, ranked last).
 
 ```bash
 python3 tools/scope.py --engagement "$OUTPUT_DIR/engagement.json" https://api.target.com   # check a target
 python3 tools/scope.py --selftest
+python3 tools/scope.py --active                      # which engagement the hook enforces
+python3 tools/scope.py --activate "$OUTPUT_DIR"      # switch the hook to another engagement
 
 python3 tools/engagement-state.py summary
 python3 tools/engagement-state.py set-phase hunt

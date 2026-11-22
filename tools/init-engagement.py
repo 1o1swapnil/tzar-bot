@@ -215,6 +215,12 @@ def main():
         "org":          "tzar-bot",
     }, indent=2))
 
+    # Make this the active scope for the scope-check PreToolUse hook (the hook can't
+    # see the OUTPUT_DIR exported below — it isn't a child of the Bash tool shell).
+    sys.path.insert(0, str(BASE_DIR / "tools"))
+    from scope import set_active
+    set_active(output_dir)
+
     # Register in session memory DB
     import subprocess as _sp
     _mem = _sp.run(
@@ -232,6 +238,7 @@ def main():
     print(f"  OUTPUT_DIR={output_dir}")
     print(f"  attack-chain.md initialised")
     print(f"  engagement.json written")
+    print(f"  active scope set (.tzar/active-engagement)")
     print(f"  session memory registered (memory.db)")
     print()
 

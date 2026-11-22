@@ -1,0 +1,25 @@
+{
+  "target": "dvwa",
+  "version": "curated-v1 (digininja/DVWA 2.x, security=low)",
+  "notes": "One entry per DVWA module at security level low. Newer DVWA builds add modules (authbypass, open_redirect, cryptography, api) — marked verify=true; `benchmark.py verify-gt dvwa` reports which exist on your build (probes return 302 to login when unauthenticated, which counts as present).",
+  "entries": [
+    {"id": "dvwa-sqli", "title": "SQL injection (user ID lookup)", "classes": ["sqli"], "endpoints": ["/vulnerabilities/sqli/"], "severity": "critical", "probe": "/vulnerabilities/sqli/"},
+    {"id": "dvwa-sqli-blind", "title": "Blind SQL injection", "classes": ["sqli"], "endpoints": ["/vulnerabilities/sqli_blind/"], "severity": "high", "probe": "/vulnerabilities/sqli_blind/"},
+    {"id": "dvwa-exec", "title": "OS command injection (ping)", "classes": ["command-injection"], "endpoints": ["/vulnerabilities/exec/"], "severity": "critical", "probe": "/vulnerabilities/exec/"},
+    {"id": "dvwa-xss-r", "title": "Reflected XSS", "classes": ["xss-reflected"], "endpoints": ["/vulnerabilities/xss_r/"], "severity": "medium", "probe": "/vulnerabilities/xss_r/"},
+    {"id": "dvwa-xss-s", "title": "Stored XSS (guestbook)", "classes": ["xss-stored"], "endpoints": ["/vulnerabilities/xss_s/"], "severity": "high", "probe": "/vulnerabilities/xss_s/"},
+    {"id": "dvwa-xss-d", "title": "DOM XSS (language selector)", "classes": ["xss-dom"], "endpoints": ["/vulnerabilities/xss_d/"], "severity": "medium", "probe": "/vulnerabilities/xss_d/"},
+    {"id": "dvwa-csrf", "title": "CSRF on password change", "classes": ["csrf"], "endpoints": ["/vulnerabilities/csrf/"], "severity": "medium", "probe": "/vulnerabilities/csrf/"},
+    {"id": "dvwa-fi", "title": "File inclusion (local / remote)", "classes": ["lfi", "rfi", "path-traversal"], "endpoints": ["/vulnerabilities/fi/"], "severity": "high", "probe": "/vulnerabilities/fi/?page=include.php"},
+    {"id": "dvwa-upload", "title": "Unrestricted file upload (web shell)", "classes": ["file-upload"], "endpoints": ["/vulnerabilities/upload/"], "severity": "critical", "probe": "/vulnerabilities/upload/"},
+    {"id": "dvwa-brute", "title": "Login brute force (no lockout / rate limit)", "classes": ["brute-force"], "endpoints": ["/vulnerabilities/brute/"], "severity": "medium", "probe": "/vulnerabilities/brute/"},
+    {"id": "dvwa-captcha", "title": "Insecure CAPTCHA (bypassable step check)", "classes": ["captcha", "business-logic"], "endpoints": ["/vulnerabilities/captcha/"], "severity": "medium", "probe": "/vulnerabilities/captcha/"},
+    {"id": "dvwa-weak-id", "title": "Weak / predictable session IDs", "classes": ["weak-session"], "endpoints": ["/vulnerabilities/weak_id/"], "severity": "medium", "probe": "/vulnerabilities/weak_id/"},
+    {"id": "dvwa-csp", "title": "CSP bypass leading to script execution", "classes": ["xss", "security-headers"], "endpoints": ["/vulnerabilities/csp/"], "severity": "medium", "probe": "/vulnerabilities/csp/"},
+    {"id": "dvwa-javascript", "title": "Client-side JavaScript token logic bypass", "classes": ["business-logic"], "endpoints": ["/vulnerabilities/javascript/"], "severity": "low", "probe": "/vulnerabilities/javascript/"},
+    {"id": "dvwa-authbypass", "title": "Authorisation bypass (user management API)", "classes": ["access-control"], "endpoints": ["/vulnerabilities/authbypass/"], "severity": "high", "probe": "/vulnerabilities/authbypass/", "verify": true},
+    {"id": "dvwa-open-redirect", "title": "Open redirect", "classes": ["open-redirect"], "endpoints": ["/vulnerabilities/open_redirect/"], "severity": "medium", "probe": "/vulnerabilities/open_redirect/", "verify": true},
+    {"id": "dvwa-cryptography", "title": "Weak cryptography (encoding/encryption misuse)", "classes": ["crypto"], "endpoints": ["/vulnerabilities/cryptography/"], "severity": "medium", "probe": "/vulnerabilities/cryptography/", "verify": true},
+    {"id": "dvwa-default-creds", "title": "Default administrator credentials (admin/password)", "classes": ["weak-credentials"], "endpoints": ["/login.php"], "severity": "high", "probe": "/login.php"}
+  ]
+}

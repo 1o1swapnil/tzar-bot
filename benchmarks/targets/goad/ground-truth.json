@@ -1,0 +1,6 @@
+{
+  "target": "goad",
+  "version": "template — fill in for your GOAD variant",
+  "notes": "Not curated: GOAD's vulnerability set depends on the lab variant (GOAD, GOAD-Light, MINILAB, SCCM, NHA). Add one entry per weakness from the GOAD docs (e.g. AS-REP roastable user, Kerberoastable SPN, ADCS ESC1-ESC15, unconstrained/constrained delegation, ACL abuse paths, LLMNR/NBT-NS, SMB signing off, password in description, MSSQL links) with classes from tools/benchmark.py (add new class names freely; scoring matches on class + endpoint regex, where endpoint is the host/FQDN).",
+  "entries": []
+}

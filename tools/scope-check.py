@@ -1373,6 +1373,11 @@ class Checker:
             self.guards.append(f"`{tool} {args[0]}`: container traffic is forwarded, not locally "
                                f"generated, so it bypasses the egress firewall")
             return
+        if name == "benchmark.py" and sub and sub[0] == "up":
+            self.guards.append("starts a deliberately vulnerable benchmark target in Docker "
+                               "(container traffic bypasses the egress firewall): "
+                               + " ".join(sub))
+            return
         if name == "validate-finding.py" and "--replay-writes" in sub:
             self.guards.append("replays state-changing requests from replay.json against the "
                                "target: " + " ".join(sub))

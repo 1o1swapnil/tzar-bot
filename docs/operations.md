@@ -101,6 +101,19 @@ The coordinator writes prose reasoning to `attack-chain.md` and structured state
 
 ---
 
+## Benchmarks
+
+Measure tzar-bot against vulnerable targets with known answers (Juice Shop, DVWA, crAPI locally in Docker on 127.0.0.1; GOAD template for an external lab) and score Burp/ZAP/nuclei/human runs on the same key. Details: `benchmarks/README.md`.
+
+```bash
+python3 tools/benchmark.py list | status
+python3 tools/benchmark.py up juice-shop && python3 tools/benchmark.py init juice-shop
+python3 tools/benchmark.py score juice-shop tzar:"$OUTPUT_DIR" --label tzar-<version>
+python3 tools/benchmark.py compare juice-shop
+```
+
+---
+
 ## Validation & report gates
 
 ```bash

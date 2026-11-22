@@ -1,0 +1,21 @@
+{
+  "target": "crapi",
+  "version": "curated-v1 (OWASP crAPI main)",
+  "notes": "Mapped from crAPI's documented challenge list (docs/challenges.md in the crAPI repo). Endpoint paths are from crAPI's identity/workshop/community services and are marked verify=true until confirmed on a first run; crAPI endpoints require auth, so verify-gt treats 401/403 as present.",
+  "entries": [
+    {"id": "crapi-bola-vehicle", "title": "BOLA: another user's vehicle location", "classes": ["idor"], "endpoints": ["/identity/api/v2/vehicle/.+/location"], "severity": "high", "verify": true},
+    {"id": "crapi-bola-mechanic-report", "title": "BOLA: other users' mechanic reports", "classes": ["idor"], "endpoints": ["/workshop/api/mechanic/mechanic_report", "report_id="], "severity": "high", "verify": true},
+    {"id": "crapi-otp-bruteforce", "title": "Broken authentication: OTP brute force on an older reset API version", "classes": ["brute-force", "password-reset"], "endpoints": ["/identity/api/auth/v\\d/check-otp"], "severity": "critical", "verify": true},
+    {"id": "crapi-excessive-data-posts", "title": "Excessive data exposure: community posts leak other users' data", "classes": ["info-disclosure"], "endpoints": ["/community/api/v2/community/posts"], "severity": "medium", "verify": true},
+    {"id": "crapi-excessive-data-video", "title": "Excessive data exposure: internal video property returned", "classes": ["info-disclosure"], "endpoints": ["/identity/api/v2/user/videos"], "severity": "low", "verify": true},
+    {"id": "crapi-rate-limit-mechanic", "title": "Unrestricted resource consumption: contact-mechanic repeat requests (DoS)", "classes": ["rate-limit"], "endpoints": ["/workshop/api/merchant/contact_mechanic"], "severity": "medium", "verify": true},
+    {"id": "crapi-bfla-delete-video", "title": "BFLA: delete another user's video via admin API", "classes": ["bfla"], "endpoints": ["/identity/api/v2/admin/videos"], "severity": "high", "verify": true},
+    {"id": "crapi-mass-assignment-order", "title": "Mass assignment: order status/quantity manipulated for refunds / free items", "classes": ["mass-assignment", "business-logic"], "endpoints": ["/workshop/api/shop/orders"], "severity": "high", "verify": true},
+    {"id": "crapi-mass-assignment-video", "title": "Mass assignment: internal video conversion property writable", "classes": ["mass-assignment"], "endpoints": ["/identity/api/v2/user/videos"], "severity": "medium", "verify": true},
+    {"id": "crapi-ssrf", "title": "SSRF via contact-mechanic mechanic_api URL", "classes": ["ssrf"], "endpoints": ["/workshop/api/merchant/contact_mechanic"], "severity": "high", "verify": true},
+    {"id": "crapi-nosqli-coupon", "title": "NoSQL injection in coupon validation", "classes": ["nosqli"], "endpoints": ["/community/api/v2/coupon/validate-coupon"], "severity": "high", "verify": true},
+    {"id": "crapi-sqli-coupon", "title": "SQL injection in coupon redemption", "classes": ["sqli"], "endpoints": ["/workshop/api/shop/apply_coupon"], "severity": "critical", "verify": true},
+    {"id": "crapi-unauth-order", "title": "Unauthenticated / unauthorised access to order details", "classes": ["access-control", "idor"], "endpoints": ["/workshop/api/shop/orders/\\d+"], "severity": "high", "verify": true},
+    {"id": "crapi-jwt", "title": "JWT verification weaknesses (forged token accepted)", "classes": ["jwt"], "endpoints": [], "severity": "critical", "verify": true}
+  ]
+}

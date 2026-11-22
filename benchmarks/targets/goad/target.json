@@ -1,0 +1,8 @@
+{
+  "name": "goad",
+  "summary": "Game of Active Directory — multi-forest Windows AD lab (not runnable on this host)",
+  "kind": "external",
+  "url": "",
+  "engagement_type": "Network",
+  "notes": "GOAD needs several x86 Windows VMs (VirtualBox/VMware/Proxmox/AWS) and 24 GB+ RAM. Build it on a separate lab host (https://github.com/Orange-Cyberdefense/GOAD), fill ground-truth.json from the GOAD docs for the lab variant you deploy, and score with `score goad tzar:<OUTPUT_DIR>`."
+}

@@ -1,0 +1,28 @@
+{
+  "name": "juice-shop",
+  "summary": "OWASP Juice Shop \u2014 modern SPA + REST API, ~100 scored challenges",
+  "kind": "docker",
+  "image": "bkimminich/juice-shop:latest",
+  "ports": [
+    [
+      "127.0.0.1",
+      3000,
+      3000
+    ]
+  ],
+  "memory": "1g",
+  "url": "http://127.0.0.1:3000",
+  "health": "/rest/admin/application-version",
+  "startup_seconds": 180,
+  "engagement_type": "WAPT",
+  "mode": "blackbox",
+  "scope": [
+    "127.0.0.1",
+    "localhost"
+  ],
+  "tester_notes": [
+    "Restart the target right before the run (benchmark.py down + up): Juice Shop state is in memory, so this resets the scoreboard to 0.",
+    "Blackbox: register your own accounts; no credentials are given.",
+    "Score both the report (tzar:) and the objective scoreboard: python3 tools/benchmark.py solved juice-shop"
+  ]
+}

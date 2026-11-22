@@ -1,0 +1,20 @@
+{
+  "name": "dvwa",
+  "summary": "Damn Vulnerable Web Application — classic PHP vuln modules (security=low)",
+  "kind": "docker",
+  "image": "ghcr.io/digininja/dvwa:latest",
+  "ports": [["127.0.0.1", 4280, 80]],
+  "memory": "768m",
+  "env": {"DB_SERVER": "127.0.0.1"},
+  "url": "http://127.0.0.1:4280",
+  "health": "/login.php",
+  "startup_seconds": 120,
+  "engagement_type": "WAPT",
+  "mode": "graybox",
+  "scope": ["127.0.0.1", "localhost"],
+  "after_up": ["If the DB isn't initialised, open /setup.php and click 'Create / Reset Database' (or set up in-container MariaDB)."],
+  "tester_notes": [
+    "Graybox: log in as admin / password, then set the security level cookie to low (security=low).",
+    "Each module lives under /vulnerabilities/<name>/."
+  ]
+}

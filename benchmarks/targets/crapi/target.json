@@ -1,0 +1,17 @@
+{
+  "name": "crapi",
+  "summary": "OWASP crAPI — microservice API (OWASP API Top 10); ~8 containers, needs ~3 GB RAM",
+  "kind": "compose",
+  "compose_url": "https://raw.githubusercontent.com/OWASP/crAPI/main/deploy/docker/docker-compose.yml",
+  "compose_env": {"LISTEN_IP": "127.0.0.1"},
+  "url": "http://127.0.0.1:8888",
+  "health": "/",
+  "startup_seconds": 600,
+  "engagement_type": "API",
+  "mode": "blackbox",
+  "scope": ["127.0.0.1", "localhost"],
+  "after_up": ["Mailhog (signup/OTP e-mails) is at http://127.0.0.1:8025."],
+  "tester_notes": [
+    "Blackbox: sign up two users (attacker + victim); read OTP / vehicle e-mails in Mailhog at :8025."
+  ]
+}

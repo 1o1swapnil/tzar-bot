@@ -32,3 +32,6 @@ BugBounty/*/
 
 # Active-engagement pointer for the scope-check hook (local state)
 .tzar/
+
+# Benchmark target downloads (compose files)
+benchmarks/.cache/

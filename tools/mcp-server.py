@@ -3,7 +3,7 @@
 tzar-bot MCP server — exposes tools/ as MCP tools for Claude Code, Cursor,
 and any MCP-compatible client.
 
-Transport: stdio (Content-Length-framed JSON-RPC 2.0, same as LSP)
+Transport: stdio, newline-delimited JSON-RPC 2.0 (one message per line — the MCP stdio transport)
 
 Start manually:
     python3 tools/mcp-server.py

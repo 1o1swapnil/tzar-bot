@@ -60,19 +60,19 @@ def tool(name, *cli):
 
 # ── JSON-RPC (MCP) helper ─────────────────────────────────────────────────────
 
+# MCP stdio transport = newline-delimited JSON (one message per line), which is what
+# Claude Code speaks. Content-Length (LSP) framing made the servers hang (ec8fcd5).
+
 def _frame(obj):
-    b = json.dumps(obj).encode()
-    return f"Content-Length: {len(b)}\r\n\r\n".encode() + b
+    return json.dumps(obj).encode() + b"\n"
 
 
 def _parse_frames(raw: bytes):
-    msgs, buf = [], raw
-    while buf.startswith(b"Content-Length:"):
-        hdr_end = buf.index(b"\r\n\r\n")
-        length = int(buf[len("Content-Length:"):hdr_end].strip())
-        start = hdr_end + 4
-        msgs.append(json.loads(buf[start:start + length]))
-        buf = buf[start + length:]
+    msgs = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if line:
+            msgs.append(json.loads(line))   # a non-JSON line on stdout is a protocol bug
     return msgs
 
 
